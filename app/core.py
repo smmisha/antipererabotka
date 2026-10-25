@@ -103,6 +103,13 @@ def flash_code(secret: str, window: int, length: int) -> str:
     return "".join(chars)
 
 
+def restored_active(active_s: float, beat_at: datetime, now: datetime, idle_reset_min: float) -> float:
+    """Счётчик активного времени переносим через перезапуск, только если heartbeat свежий (моложе idle_reset_min)."""
+    if now - beat_at < timedelta(minutes=idle_reset_min):
+        return max(0.0, active_s)
+    return 0.0
+
+
 class Core:
     def __init__(self, s: Settings, start: datetime, make_code: Callable[[], str] | None = None) -> None:
         self.s = s

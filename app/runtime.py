@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import config, report, winapi
 from .config import Config, Settings
-from .core import Core, Event, bypass_event, flash_code as make_flash_code, flash_window, key_matches
+from .core import Core, Event, bypass_event, flash_code as make_flash_code, flash_window, key_matches, restored_active
 from .failsafe import ErrorThrottle, FailCounter
 from .storage import Storage
 from .tray import Tray
@@ -101,7 +101,7 @@ class Runtime:
             bypass = bypass_event(now, state, self.storage.ended_since(beat_at), self._rebooted_since(beat_at))
             if bypass is not None:
                 events.append(bypass)
-            self.core.restore_active(active_s)
+            self.core.restore_active(restored_active(active_s, beat_at, now, self.settings.idle_reset_min))
         self.storage.log(events)
         self.roots = self._roots()
         self.tray.start()

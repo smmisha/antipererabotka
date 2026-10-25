@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from app.config import Settings, short_settings
-from app.core import CODE_ALPHABET, Core, bypass_event, flash_code, flash_window, key_hash, key_matches, usb_key_allowed
+from app.core import CODE_ALPHABET, Core, bypass_event, flash_code, flash_window, key_hash, key_matches, restored_active, usb_key_allowed
 
 NORMAL = Settings()
 
@@ -371,6 +371,12 @@ def test_report_is_closed_when_the_night_lock_appears():
     t.run(10)
     assert core.lock_visible
     assert not core.report_open
+
+
+def test_counter_is_restored_only_from_a_fresh_heartbeat():
+    now = datetime(2026, 10, 26, 9, 0)
+    assert restored_active(50.0, now - timedelta(minutes=2), now, 5) == 50.0
+    assert restored_active(50.0, now - timedelta(hours=7), now, 5) == 0.0
 
 
 def test_test_escape_releases_the_night_lock():
