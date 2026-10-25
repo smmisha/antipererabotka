@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from .config import Settings
+from .core import at_logical_day
 from .storage import Storage
 
 
@@ -34,8 +35,8 @@ def day_of(at: datetime, s: Settings) -> date:
 
 
 def bounds(day: date, s: Settings) -> tuple[datetime, datetime]:
-    midnight = datetime.combine(day, time())
-    return midnight + _hhmm(s.morning_time), midnight + timedelta(days=1) + _hhmm(s.night_time)
+    start = datetime.combine(day, time()) + _hhmm(s.morning_time)
+    return start, at_logical_day(start, s.night_time, s)
 
 
 def summary(store: Storage, day: date, s: Settings) -> Summary:

@@ -373,6 +373,24 @@ def test_report_is_closed_when_the_night_lock_appears():
     assert not core.report_open
 
 
+def test_night_that_starts_before_midnight():
+    s = replace(NORMAL, report_time="23:15", reminder_time="23:25", night_time="23:30", morning_time="07:30")
+    core = Core(s, datetime(2026, 10, 25, 12, 0))
+    assert not core.in_night(datetime(2026, 10, 25, 23, 14))
+    assert core.in_night(datetime(2026, 10, 25, 23, 40))
+    assert core.in_night(datetime(2026, 10, 26, 7, 29))
+    assert not core.in_night(datetime(2026, 10, 26, 7, 30))
+    assert not usb_key_allowed(datetime(2026, 10, 25, 23, 40), s)
+    assert usb_key_allowed(datetime(2026, 10, 25, 12, 0), s)
+
+
+def test_report_day_for_a_night_before_midnight():
+    from app.report import bounds
+
+    s = replace(NORMAL, report_time="23:15", reminder_time="23:25", night_time="23:30", morning_time="07:30")
+    assert bounds(datetime(2026, 10, 25).date(), s) == (datetime(2026, 10, 25, 7, 30), datetime(2026, 10, 25, 23, 30))
+
+
 def test_counter_is_restored_only_from_a_fresh_heartbeat():
     now = datetime(2026, 10, 26, 9, 0)
     assert restored_active(50.0, now - timedelta(minutes=2), now, 5) == 50.0

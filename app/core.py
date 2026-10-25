@@ -42,18 +42,29 @@ def _clock(hhmm: str) -> timedelta:
     return timedelta(hours=int(hours), minutes=int(minutes))
 
 
+def logical_day_start(at: datetime, s: Settings) -> datetime:
+    """Начало логического дня: morning_time того календарного дня, который сейчас идёт."""
+    morning = _clock(s.morning_time)
+    return datetime.combine((at - morning).date(), time()) + morning
+
+
+def at_logical_day(day_start: datetime, hhmm: str, s: Settings) -> datetime:
+    """Момент ЧЧ:ММ внутри логического дня, который начался в day_start. Время до полуночи тоже попадает в день."""
+    offset = int((_clock(hhmm) - _clock(s.morning_time)) // timedelta(minutes=1)) % 1440
+    return day_start + timedelta(minutes=offset)
+
+
 def night_for(now: datetime, s: Settings, start: datetime | None = None) -> Night:
     """Ночь дня, который идёт или будет идти. День длится от morning_time до следующего morning_time."""
     if s.test_mode:
         base = start or now
         return Night(*(base + timedelta(minutes=m) for m in TEST_NIGHT_MIN))
-    day = (now - _clock(s.morning_time)).date()
-    base = datetime.combine(day, time()) + timedelta(days=1)
+    day_start = logical_day_start(now, s)
     return Night(
-        report=base + _clock(s.report_time),
-        reminder=base + _clock(s.reminder_time),
-        lock=base + _clock(s.night_time),
-        morning=base + _clock(s.morning_time),
+        report=at_logical_day(day_start, s.report_time, s),
+        reminder=at_logical_day(day_start, s.reminder_time, s),
+        lock=at_logical_day(day_start, s.night_time, s),
+        morning=day_start + timedelta(days=1),
     )
 
 
