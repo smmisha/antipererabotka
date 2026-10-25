@@ -38,6 +38,7 @@ class LockScreen:
         self._wins: list[tuple[tk.Toplevel, dict]] = []
         self._view: dict = {}
         self._after: str | None = None
+        self._entry: tk.Entry | None = None
         if on_test_exit is not None:
             root.bind_all("<Control-Shift-F12>", lambda _event: on_test_exit())
 
@@ -60,6 +61,7 @@ class LockScreen:
         for win, _ in self._wins:
             win.destroy()
         self._wins = []
+        self._entry = None
         self.mode = None
 
     def _build(self, mode: str) -> None:
@@ -79,17 +81,22 @@ class LockScreen:
             self._wins.append((win, widgets))
         self._after = self.root.after(1000, self._keep_front)
         if mode == "night" and self._wins:
-            self._wins[0][1]["entry"].focus_force()
+            self._entry = self._wins[0][1]["entry"]
+            self._entry.focus_force()
 
     def _keep_front(self) -> None:
+        self._after = self.root.after(1000, self._keep_front)
         for win, _ in self._wins:
             win.attributes("-topmost", True)
             win.lift()
         if self._wins:
             win = self._wins[0][0]
             winapi.foreground(int(win.wm_frame(), 16))
-            win.focus_force()
-        self._after = self.root.after(1000, self._keep_front)
+            if self.mode == "night" and self._entry is not None:
+                if self.root.focus_get() is not self._entry:
+                    self._entry.focus_force()
+            else:
+                win.focus_force()
 
     def _break_widgets(self, frame: tk.Frame) -> dict:
         w = {
@@ -117,6 +124,7 @@ class LockScreen:
             "banner": _label(frame, SMALL_FONT, MUTED),
         }
         entry = w["entry"]
+        entry.bind("<FocusIn>", lambda _event, en=entry: setattr(self, "_entry", en))
         w["button"].config(command=lambda: self._submit(entry, w["message"]))
         entry.bind("<Return>", lambda _event: self._submit(entry, w["message"]))
         for row, name in enumerate(w):
