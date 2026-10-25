@@ -243,6 +243,7 @@ class Core:
         visible = lock_due and not self._unlocked(now)
         if visible and not self._lock_shown:
             self._lock_shown = True
+            self.report_open = False
             self.lock_since = now
             self._slept = False
             self.emergency_code = self._make_code()

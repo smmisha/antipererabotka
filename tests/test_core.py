@@ -361,6 +361,18 @@ def test_no_break_right_after_the_morning():
     assert core.active_s < 3600
 
 
+def test_report_is_closed_when_the_night_lock_appears():
+    core = Core(NORMAL, datetime(2026, 10, 26, 1, 44, 50))
+    t = Ticker(core, datetime(2026, 10, 26, 1, 44, 50))
+    t.run(60)
+    assert core.report_open
+    t.run(14 * 60)
+    assert core.report_open
+    t.run(10)
+    assert core.lock_visible
+    assert not core.report_open
+
+
 def test_test_escape_releases_the_night_lock():
     core = Core(short_settings(), datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))
