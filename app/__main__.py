@@ -20,7 +20,10 @@ MUTEX_TEST = "Local\\antipererabotka-test"
 
 def make_usb_key(target: str, test: bool) -> int:
     cfg_path = config.data_dir(test) / config.CONFIG_NAME
-    cfg = config.load_or_create(cfg_path)
+    cfg, config_error = config.load_for_start(cfg_path)
+    if config_error:
+        print(f"{config_error}\nИсправь файл или удали его, потом повтори.")
+        return 1
     settings = config.short_settings() if test else cfg.settings
     if not usb_key_allowed(datetime.now(), settings):
         print("Ключ нельзя создать с 01:45 до 08:00. Сделай его днём.")
@@ -57,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     data = config.data_dir(args.test)
     cfg_path = data / config.CONFIG_NAME
     first_run = not cfg_path.exists()
-    cfg = config.load_or_create(cfg_path)
+    cfg, config_error = config.load_for_start(cfg_path)
     winapi.set_dpi_aware()
     instance = winapi.single_instance(MUTEX_TEST if args.test else MUTEX_NORMAL)
     if instance is None:
@@ -80,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         storage=storage,
         test=args.test,
         test_key_dir=args.test_key_dir,
+        config_error=config_error,
     )
     runtime.start()
     try:

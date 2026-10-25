@@ -4,12 +4,33 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_DIR = "antipererabotka"
 CONFIG_NAME = "config.json"
 DB_NAME = "antipererabotka.sqlite3"
+
+TIME_FIELDS = ("report_time", "reminder_time", "night_time", "morning_time")
+# Пределы значений из config.json. Значение вне пределов не применяется.
+RANGES = {
+    "break_interval_min": (5, 240),
+    "break_min_lock_s": (0, 600),
+    "snooze_min": (1, 60),
+    "idle_reset_min": (1, 60),
+    "active_gap_s": (10, 600),
+    "sleep_after_min": (1, 120),
+    "emergency_wait_min": (1, 60),
+    "unlock_min": (1, 120),
+    "usb_unlock_min": (1, 120),
+    "flash_code_period_min": (1, 10),
+}
+INT_RANGES = {"emergency_len": (8, 80), "flash_code_len": (8, 80)}
+
+
+class ConfigError(ValueError):
+    """Неверный config.json. Причина пишется в журнал и в error.log."""
 
 
 @dataclass(frozen=True)
@@ -105,13 +126,65 @@ def data_dir(test_mode: bool = False) -> Path:
     return base / "test" if test_mode else base
 
 
-def load(path: Path) -> Config:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+def _minutes(hhmm) -> int:
+    if not isinstance(hhmm, str) or not re.fullmatch(r"\d{2}:\d{2}", hhmm):
+        raise ConfigError(f"время должно быть в формате ЧЧ:ММ, получено {hhmm!r}")
+    hours, minutes = int(hhmm[:2]), int(hhmm[3:])
+    if hours > 23 or minutes > 59:
+        raise ConfigError(f"время {hhmm} вне суток")
+    return hours * 60 + minutes
+
+
+def _check_settings(section) -> dict:
+    if not isinstance(section, dict):
+        raise ConfigError("settings должен быть объектом")
     names = {f.name for f in fields(Settings)} - {"test_mode"}
-    values = {k: v for k, v in raw.get("settings", {}).items() if k in names}
+    values = {k: v for k, v in section.items() if k in names}
+    for name, (lo, hi) in RANGES.items():
+        if name in values:
+            value = values[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not lo <= value <= hi:
+                raise ConfigError(f"{name}: число от {lo} до {hi}, получено {value!r}")
+    for name, (lo, hi) in INT_RANGES.items():
+        if name in values:
+            value = values[name]
+            if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+                raise ConfigError(f"{name}: целое от {lo} до {hi}, получено {value!r}")
+    for name in TIME_FIELDS:
+        if name in values:
+            _minutes(values[name])
+    s = Settings(**values)
+    morning = _minutes(s.morning_time)
+    report, reminder, night = (((_minutes(t) - morning) % 1440) for t in (s.report_time, s.reminder_time, s.night_time))
+    if not 0 < report <= reminder <= night < 1440:
+        raise ConfigError("порядок времени: утро, отчёт, напоминание, блокировка, блокировка раньше следующего утра")
+    return values
+
+
+def _check_texts(section) -> dict:
+    if not isinstance(section, dict):
+        raise ConfigError("texts должен быть объектом")
     texts = dict(DEFAULT_TEXTS)
-    texts.update(raw.get("texts", {}))
-    return Config(Settings(**values), texts, str(raw.get("usb_key_sha256", "")))
+    for key, value in section.items():
+        if key not in DEFAULT_TEXTS:
+            continue  # неизвестные ключи игнорируем
+        if not isinstance(value, str):
+            raise ConfigError(f"текст {key} должен быть строкой")
+        texts[key] = value
+    return texts
+
+
+def load(path: Path) -> Config:
+    """Читает config.json и проверяет значения. Неверный файл даёт ConfigError, и ничего не применяется."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ConfigError("корень файла должен быть объектом")
+    values = _check_settings(raw.get("settings", {}))
+    texts = _check_texts(raw.get("texts", {}))
+    usb = raw.get("usb_key_sha256", "")
+    if not isinstance(usb, str):
+        raise ConfigError("usb_key_sha256 должен быть строкой")
+    return Config(Settings(**values), texts, usb)
 
 
 def save(path: Path, cfg: Config) -> None:
@@ -123,9 +196,13 @@ def save(path: Path, cfg: Config) -> None:
     tmp.replace(path)
 
 
-def load_or_create(path: Path) -> Config:
+def load_for_start(path: Path) -> tuple[Config, str | None]:
+    """Для запуска. Нет файла: создаём со значениями по умолчанию. Неверный файл не трогаем, работаем на значениях по умолчанию."""
     if not path.exists():
         cfg = Config()
         save(path, cfg)
-        return cfg
-    return load(path)
+        return cfg, None
+    try:
+        return load(path), None
+    except (OSError, ValueError) as exc:
+        return Config(), f"config.json: {exc}"

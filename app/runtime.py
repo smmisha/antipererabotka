@@ -44,6 +44,7 @@ class Runtime:
         storage: Storage,
         test: bool,
         test_key_dir: str | None,
+        config_error: str | None = None,
     ) -> None:
         self.root = root
         self.data = data
@@ -51,6 +52,7 @@ class Runtime:
         self.storage = storage
         self.test = test
         self.test_key_dir = test_key_dir
+        self._config_error = config_error
         self.cfg_path = data / config.CONFIG_NAME
         self.settings: Settings = config.short_settings() if test else cfg.settings
         self.core: Core | None = None
@@ -85,6 +87,9 @@ class Runtime:
     def start(self) -> None:
         now = datetime.now()
         events = [Event("app_start", now, {"test": self.test})]
+        if self._config_error:
+            events.append(Event("config_invalid", now, {"reason": self._config_error}))
+            self._log_error_text(self._config_error)
         last = self.storage.last_beat()
         self.core = Core(self.settings, now)
         if last is not None:
@@ -236,15 +241,22 @@ class Runtime:
         self._cfg_mtime = mtime
         try:
             fresh = config.load(self.cfg_path)
-        except (OSError, ValueError, TypeError):
-            return  # битый файл: остаёмся на прежних настройках
+        except OSError:
+            return
+        except ValueError as exc:  # неверные значения или битый JSON: остаёмся на прежних настройках
+            self.storage.log([Event("config_invalid", now, {"reason": str(exc)})])
+            self._log_error_text(f"config.json: {exc}")
+            return
         self.cfg = fresh
         if not self.test:
             self.core.request_settings(fresh.settings, now)
 
     def _record_error(self) -> None:
+        self._log_error_text(traceback.format_exc())
+
+    def _log_error_text(self, text: str) -> None:
         with open(self.data / "error.log", "a", encoding="utf-8") as log:
-            log.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}\n{traceback.format_exc()}\n")
+            log.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}\n{text}\n")
 
     # Тексты для окон
 
