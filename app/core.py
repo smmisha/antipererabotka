@@ -256,6 +256,7 @@ class Core:
         if night.reminder <= now < night.lock and self._reminder_for != night.reminder:
             self._reminder_for = night.reminder
             self.report_open = True
+            ev.append(Event("reminder_shown", now))
         lock_due = now >= night.lock
         if self.wait_until is not None and now >= self.wait_until:
             self._unlock(now, "emergency", self.s.unlock_min, ev)

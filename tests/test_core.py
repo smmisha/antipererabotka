@@ -409,6 +409,13 @@ def test_idle_during_a_break_does_not_close_it():
     assert kinds(core.water_drunk(t.now)) == ["water_drunk"]
 
 
+def test_reminder_at_0155_is_logged():
+    core = Core(NORMAL, datetime(2026, 10, 26, 1, 54, 50))
+    t = Ticker(core, datetime(2026, 10, 26, 1, 54, 50))
+    events = t.run(20)
+    assert "reminder_shown" in kinds(events)
+
+
 def test_test_escape_releases_the_night_lock():
     core = Core(short_settings(), datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))
