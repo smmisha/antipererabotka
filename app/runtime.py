@@ -359,6 +359,7 @@ class Runtime:
                 t["stat_snoozed"].format(n=summary.snoozed),
                 t["stat_longest"].format(minutes=summary.longest_min),
                 t["stat_emergency"].format(n=summary.emergency),
+                t["stat_usb"].format(n=summary.usb),
                 t["stat_bypass"].format(n=summary.bypass),
                 t["stat_restart"].format(n=summary.restart),
             ],

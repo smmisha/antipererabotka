@@ -56,7 +56,7 @@ def summary(store: Storage, day: date, s: Settings) -> Summary:
         snoozed=counts["break_snoozed"],
         longest_min=round(longest_s / 60),
         emergency=counts["unlock_emergency"],
-        usb=counts["unlock_usb"],
+        usb=counts["unlock_usb"] + counts["unlock_usb_code"],
         bypass=counts["bypass"],
         clock=counts["clock_change"],
         restart=counts["restart_during_lock"],

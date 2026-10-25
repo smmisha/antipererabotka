@@ -57,6 +57,16 @@ def test_summary_counts_the_day_from_0800_to_0200(tmp_path):
     db.close()
 
 
+def test_summary_counts_flash_unlocks_under_both_names(tmp_path):
+    db = make_store(tmp_path)
+    db.log([
+        Event("unlock", datetime(2026, 10, 25, 22, 0), {"method": "usb"}),
+        Event("unlock", datetime(2026, 10, 25, 23, 0), {"method": "usb_code"}),
+    ])
+    assert summary(db, date(2026, 10, 25), Settings()).usb == 2
+    db.close()
+
+
 def test_week_splits_activity_by_logical_day(tmp_path):
     db = make_store(tmp_path)
     db.add_active(datetime(2026, 10, 25, 9, 30), 3600)
