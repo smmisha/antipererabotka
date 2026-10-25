@@ -173,6 +173,7 @@ app/
   config.py     config.json, значения по умолчанию, тексты
   storage.py    SQLite: события, активное время, heartbeat
   report.py     сводка за день и активные часы за неделю
+  failsafe.py   счётчик сбоев цикла и повторы записей в error.log
   winapi.py     ctypes: простой, мониторы, клавиатурный хук, сон, mutex, съёмные диски
   ui_lock.py    блокирующие окна
   ui_report.py  окно отчёта
