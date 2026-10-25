@@ -71,10 +71,12 @@ DEFAULT_TEXTS = {
     "night_code_button": "Проверить код",
     "night_code_wrong": "Код не совпал. Набери ещё раз.",
     "night_wait": "Разблокировка через {left}",
-    "night_open": "Экран открыт ещё {left}",
     "night_usb_hint": "Вставь флешку с ключом, чтобы открыть экран на {minutes} минут.",
     "tray_break": "До перерыва: {min} мин",
     "tray_night": "Ночной режим до {morning}",
+    "tray_stats": "Статистика за сегодня",
+    "tray_settings": "Открыть настройки",
+    "first_run_title": "Антипереработка",
     "first_run": (
         "Перерыв на воду каждые {interval} мин активной работы.\n"
         "Отчёт в {report}, блокировка в {night}, утро в {morning}.\n\n"
