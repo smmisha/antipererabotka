@@ -68,6 +68,15 @@ class _KBDLLHOOKSTRUCT(ctypes.Structure):
     ]
 
 
+SEM_FAILCRITICALERRORS = 0x0001
+SEM_NOOPENFILEERRORBOX = 0x8000
+
+
+def set_error_mode() -> None:
+    """Пустой картридер или флешка без носителя не должны открывать системное окно «Нет диска»."""
+    kernel32.SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX)
+
+
 def set_dpi_aware() -> None:
     """Иначе на мониторах с масштабированием окна блокировки ложатся криво."""
     try:
@@ -147,6 +156,7 @@ def foreground(hwnd: int) -> None:
 
 def single_instance(name: str):
     """Вернёт handle, который надо держать живым. None — уже запущен другой экземпляр."""
+    ctypes.set_last_error(0)  # иначе устаревший код ошибки даст ложное «уже запущено»
     handle = kernel32.CreateMutexW(None, False, name)
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         return None

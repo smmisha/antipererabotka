@@ -150,10 +150,12 @@ class Runtime:
         now = datetime.now()
         self._reload_config(now)
         self._process_actions(now)
-        roots = self._roots()
-        self.roots = roots
-        self._update_flash(roots)
         events = self.core.tick(now, winapi.idle_seconds(), winapi.tick_ms(), time.time())
+        if self.core.lock_visible:  # съёмные диски и файл ключа ищем только на экране ночной блокировки
+            self._update_flash(self._roots())
+        else:
+            self._flash_root = None
+            self.flash_secret = None
         self.storage.log(events)
         if self.core.take_sleep():
             self._sleep(now)

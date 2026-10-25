@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     first_run = not cfg_path.exists()
     cfg, config_error = config.load_for_start(cfg_path)
     winapi.set_dpi_aware()
+    winapi.set_error_mode()
     instance = winapi.single_instance(MUTEX_TEST if args.test else MUTEX_NORMAL)
     if instance is None:
         return 0
