@@ -261,7 +261,7 @@ class Runtime:
         if core.wait_until is not None:
             wait = t["night_wait"].format(left=_mmss((core.wait_until - now).total_seconds()))
         return {
-            "title": t["night_title"].format(morning=core.s.morning_time),
+            "title": t["night_title"].format(morning=core.night(now).morning.strftime("%H:%M")),
             "now": t["night_now"].format(now=now.strftime("%H:%M:%S")),
             "code_label": t["night_code_label"],
             "code": core.emergency_code,
@@ -309,5 +309,5 @@ class Runtime:
         t = self.cfg.texts
         minutes = self.core.minutes_to_break(now)
         if minutes is None:
-            return t["tray_night"].format(morning=self.core.s.morning_time)
+            return t["tray_night"].format(morning=self.core.night(now).morning.strftime("%H:%M"))
         return t["tray_break"].format(min=math.ceil(minutes))
