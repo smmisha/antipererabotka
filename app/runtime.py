@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import config, report, winapi
 from .config import Config, Settings
-from .core import Core, Event, bypass_event, key_matches
+from .core import Core, Event, bypass_event, flash_code as make_flash_code, flash_window, key_matches
 from .storage import Storage
 from .tray import Tray
 from .ui_lock import LockScreen
@@ -72,6 +72,8 @@ class Runtime:
         )
         self.guard = winapi.KeyboardGuard()
         self.roots: set[str] = set()
+        self.flash_secret: str | None = None
+        self._flash_root: str | None = None
         self._cfg_mtime = self._mtime()
         self._cfg_checked = 0.0
         self._beat_at = 0.0
@@ -120,10 +122,9 @@ class Runtime:
         self._reload_config(now)
         self._process_actions(now)
         roots = self._roots()
-        inserted = roots - self.roots
         self.roots = roots
-        key_inserted = any(self._key_ok(root) for root in inserted)
-        events = self.core.tick(now, winapi.idle_seconds(), winapi.tick_ms(), time.time(), key_inserted)
+        self._update_flash(roots)
+        events = self.core.tick(now, winapi.idle_seconds(), winapi.tick_ms(), time.time())
         self.storage.log(events)
         if self.core.take_sleep():
             self._sleep(now)
@@ -170,7 +171,10 @@ class Runtime:
         self.storage.log(self.core.snooze(datetime.now()))
 
     def emergency(self, typed: str) -> bool:
-        return self.core.emergency_submit(datetime.now(), typed)
+        now = datetime.now()
+        if self.core.flash_submit(now, time.time(), typed, self.flash_secret):
+            return True
+        return self.core.emergency_submit(now, typed)
 
     def test_exit(self) -> None:
         self.storage.log(self.core.test_escape(datetime.now()))
@@ -194,9 +198,18 @@ class Runtime:
     def _roots(self) -> set[str]:
         return winapi.removable_roots([self.test_key_dir] if self.test_key_dir else [])
 
-    def _key_ok(self, root: str) -> bool:
-        text = winapi.read_key(root)
-        return text is not None and key_matches(text, self.cfg.usb_key_sha256)
+    def _update_flash(self, roots: set[str]) -> None:
+        """Секрет есть, пока флешка с ключом в порту: из него считается код на экране."""
+        if self._flash_root is not None and self._flash_root not in roots:
+            self._flash_root = None
+            self.flash_secret = None
+        if self.flash_secret is None:
+            for root in sorted(roots):
+                text = winapi.read_key(root)
+                if text is not None and key_matches(text, self.cfg.usb_key_sha256):
+                    self._flash_root = root
+                    self.flash_secret = text.strip()
+                    return
 
     def _sleep(self, now: datetime) -> None:
         ok = winapi.suspend()
@@ -254,18 +267,25 @@ class Runtime:
     def _night_view(self, now: datetime) -> dict:
         t = self.cfg.texts
         core = self.core
-        hint = t["night_code_hint"]
-        if self.cfg.usb_key_sha256:
-            hint += "\n" + t["night_usb_hint"].format(minutes=_num(core.s.usb_unlock_min))
+        flash_label, flash_code, flash_timer = t["flash_missing"], "", ""
+        if self.flash_secret is not None:
+            period = core.s.flash_code_period_min * 60
+            wall = time.time()
+            flash_label = t["flash_label"]
+            flash_code = make_flash_code(self.flash_secret, flash_window(wall, period), core.s.flash_code_len)
+            flash_timer = t["flash_timer"].format(left=_mmss(period - wall % period))
         wait = ""
         if core.wait_until is not None:
             wait = t["night_wait"].format(left=_mmss((core.wait_until - now).total_seconds()))
         return {
             "title": t["night_title"].format(morning=core.night(now).morning.strftime("%H:%M")),
             "now": t["night_now"].format(now=now.strftime("%H:%M:%S")),
+            "flash_label": flash_label,
+            "flash_code": flash_code,
+            "flash_timer": flash_timer,
             "code_label": t["night_code_label"],
             "code": core.emergency_code,
-            "hint": hint,
+            "hint": t["night_code_hint"],
             "button": t["night_code_button"],
             "wait": wait,
             "wrong": t["night_code_wrong"],

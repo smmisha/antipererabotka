@@ -18,6 +18,8 @@ def test_defaults_match_the_spec():
     assert s.emergency_wait_min == 10
     assert s.unlock_min == 30
     assert s.usb_unlock_min == 30
+    assert s.flash_code_len == 40
+    assert s.flash_code_period_min == 2
     assert s.test_mode is False
 
 

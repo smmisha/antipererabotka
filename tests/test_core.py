@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from app.config import Settings, short_settings
-from app.core import CODE_ALPHABET, Core, bypass_event, key_hash, key_matches, usb_key_allowed
+from app.core import CODE_ALPHABET, Core, bypass_event, flash_code, flash_window, key_hash, key_matches, usb_key_allowed
 
 NORMAL = Settings()
 
@@ -17,14 +17,13 @@ class Ticker:
         self.wall = wall
         self.events = core.tick(now, 0.0, ticks, wall)
 
-    def run(self, seconds, idle=0.0, key=False, step=1.0):
+    def run(self, seconds, idle=0.0, step=1.0):
         events = []
         for _ in range(round(seconds / step)):
             self.now += timedelta(seconds=step)
             self.ticks += round(step * 1000)
             self.wall += step
-            events += self.core.tick(self.now, idle, self.ticks, self.wall, key)
-            key = False
+            events += self.core.tick(self.now, idle, self.ticks, self.wall)
         return events
 
 
@@ -173,18 +172,38 @@ def test_night_ends_at_morning():
 
 # USB-ключ и экстренный код
 
-def test_usb_key_unlocks_on_insertion_not_on_presence():
+def test_inserting_the_flash_alone_does_not_unlock():
     core = Core(NORMAL, datetime(2026, 10, 26, 3, 0))
     t = Ticker(core, datetime(2026, 10, 26, 3, 0))
     t.run(60)
     assert core.lock_visible
-    events = t.run(1, key=True)
-    assert not core.lock_visible
-    assert [(e.kind, e.payload) for e in events if e.kind == "unlock"] == [("unlock", {"method": "usb"})]
-    t.run(29 * 60)
-    assert not core.lock_visible
-    t.run(60)
+    events = t.run(60)
     assert core.lock_visible
+    assert "unlock" not in kinds(events)
+
+
+def test_flash_code_is_40_chars_from_the_alphabet_and_changes_per_window():
+    code = flash_code("ab" * 32, 10, 40)
+    assert len(code) == 40
+    assert set(code) <= set(CODE_ALPHABET)
+    assert code == flash_code("ab" * 32, 10, 40)
+    assert code != flash_code("ab" * 32, 11, 40)
+    assert code != flash_code("cd" * 32, 10, 40)
+
+
+def test_flash_code_unlocks_for_current_and_previous_window_only():
+    secret = "ab" * 32
+    core = Core(NORMAL, datetime(2026, 10, 26, 3, 0))
+    t = Ticker(core, datetime(2026, 10, 26, 3, 0))
+    window = flash_window(t.wall, 120)
+    assert core.lock_visible
+    assert not core.flash_submit(t.now, t.wall, flash_code(secret, window - 2, 40), secret)
+    assert not core.flash_submit(t.now, t.wall, flash_code(secret, window, 40), None)
+    assert not core.flash_submit(t.now, t.wall, flash_code("cd" * 32, window, 40), secret)
+    assert core.flash_submit(t.now, t.wall, flash_code(secret, window - 1, 40), secret)
+    events = t.run(1)
+    assert [(e.kind, e.payload) for e in events if e.kind == "unlock"] == [("unlock", {"method": "usb_code"})]
+    assert not core.lock_visible
 
 
 def test_emergency_code_waits_then_unlocks_for_30_minutes():

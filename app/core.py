@@ -87,6 +87,21 @@ def bypass_event(now: datetime, prev_state: str | None, unlocked_since_prev: boo
     return None
 
 
+def flash_window(wall: float, period_s: float) -> int:
+    """Номер окна времени. Код меняется на границе окна."""
+    return int(wall // period_s)
+
+
+def flash_code(secret: str, window: int, length: int) -> str:
+    """Код из секрета флешки и номера окна: без флешки его не получить."""
+    key = secret.strip().encode("utf-8")
+    chars = []
+    for i in range(length):
+        digest = hmac.new(key, f"{window}:{i}".encode(), hashlib.sha256).digest()
+        chars.append(CODE_ALPHABET[int.from_bytes(digest, "big") % len(CODE_ALPHABET)])
+    return "".join(chars)
+
+
 class Core:
     def __init__(self, s: Settings, start: datetime, make_code: Callable[[], str] | None = None) -> None:
         self.s = s
@@ -112,6 +127,7 @@ class Core:
         self._pending: tuple[Settings, datetime] | None = None
         self._last: tuple[int, float] | None = None
         self._unflushed_s = 0.0
+        self._events: list[Event] = []
 
     def _random_code(self) -> str:
         return "".join(secrets.choice(CODE_ALPHABET) for _ in range(self.s.emergency_len))
@@ -161,16 +177,16 @@ class Core:
         idle_s: float,
         ticks_ms: int,
         wall: float,
-        key_inserted: bool = False,
     ) -> list[Event]:
-        """ticks_ms — GetTickCount64, wall — time.time(), idle_s — секунды без ввода, key_inserted — USB-ключ только что появился."""
-        ev: list[Event] = []
+        """ticks_ms — GetTickCount64, wall — time.time(), idle_s — секунды без ввода."""
+        ev: list[Event] = self._events
+        self._events = []
         self._apply_pending(now, ev)
         in_night = self.in_night(now)
         dt, resumed = self._check_time(now, ticks_ms, wall, in_night, ev)
         if in_night:
             self.break_since = None
-            self._night_tick(now, key_inserted, resumed, ev)
+            self._night_tick(now, resumed, ev)
         elif self._night_key is not None:
             self._end_night(now, ev)
         if idle_s >= self.s.idle_reset_min * 60:
@@ -204,7 +220,7 @@ class Core:
             return dt, False
         return dt, d_wall > RESUME_GAP_S
 
-    def _night_tick(self, now: datetime, key_inserted: bool, resumed: bool, ev: list[Event]) -> None:
+    def _night_tick(self, now: datetime, resumed: bool, ev: list[Event]) -> None:
         night = self.night(now)
         if night.report != self._night_key:
             self._night_key = night.report
@@ -219,8 +235,6 @@ class Core:
             self._reminder_for = night.reminder
             self.report_open = True
         lock_due = now >= night.lock
-        if key_inserted and lock_due:
-            self._unlock(now, "usb", self.s.usb_unlock_min, ev)
         if self.wait_until is not None and now >= self.wait_until:
             self._unlock(now, "emergency", self.s.unlock_min, ev)
         visible = lock_due and not self._unlocked(now)
@@ -310,6 +324,21 @@ class Core:
         self.wait_until = now + timedelta(minutes=self.s.emergency_wait_min)
         self.emergency_code = self._make_code()
         return True
+
+    def flash_submit(self, now: datetime, wall: float, typed: str, secret: str | None) -> bool:
+        """Код с флешки: принимаются текущее и предыдущее окно. Без секрета (флешки в порту) не принимается."""
+        if not self._lock_shown or not secret:
+            return False
+        window = flash_window(wall, self.s.flash_code_period_min * 60)
+        given = typed.strip().encode()
+        for w in (window, window - 1):
+            if hmac.compare_digest(given, flash_code(secret, w, self.s.flash_code_len).encode()):
+                self.unlock_from = now
+                self.unlock_until = now + timedelta(minutes=self.s.usb_unlock_min)
+                self.wait_until = None
+                self._events.append(Event("unlock", now, {"method": "usb_code"}))
+                return True
+        return False
 
     def test_escape(self, now: datetime) -> list[Event]:
         """Ctrl+Shift+F12 в тестовом режиме: снимает текущую блокировку."""

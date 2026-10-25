@@ -114,6 +114,9 @@ class LockScreen:
         w = {
             "title": _label(frame, TITLE_FONT, FG),
             "now": _label(frame, TEXT_FONT, MUTED),
+            "flash_label": _label(frame, SMALL_FONT, MUTED),
+            "flash_code": _label(frame, CODE_FONT, FG),
+            "flash_timer": _label(frame, SMALL_FONT, WARN),
             "code_label": _label(frame, SMALL_FONT, MUTED),
             "code": _label(frame, CODE_FONT, FG),
             "hint": _label(frame, SMALL_FONT, MUTED),
@@ -197,14 +200,19 @@ def _update_night(w: dict, view: dict) -> None:
         w["message"].config(text="")
     w["title"].config(text=view["title"])
     w["now"].config(text=view["now"])
+    w["flash_label"].config(text=view["flash_label"])
+    w["flash_code"].config(text=view["flash_code"])
+    w["flash_timer"].config(text=view["flash_timer"])
     w["code_label"].config(text=view["code_label"])
     w["code"].config(text=view["code"])
     w["hint"].config(text=view["hint"])
     w["button"].config(text=view["button"])
     w["wait"].config(text=view["wait"])
     w["banner"].config(text=view["banner"])
-    for name in ("code_label", "code", "hint", "entry", "button"):
+    for name in ("flash_label", "flash_code", "flash_timer", "code_label", "code", "hint", "entry", "button"):
         _toggle(w[name], not waiting)
+    _toggle(w["flash_code"], not waiting and bool(view["flash_code"]))
+    _toggle(w["flash_timer"], not waiting and bool(view["flash_timer"]))
     _toggle(w["message"], not waiting)
     _toggle(w["wait"], waiting)
     _toggle(w["banner"], bool(view["banner"]))

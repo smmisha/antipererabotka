@@ -29,6 +29,8 @@ class Settings:
     emergency_wait_min: float = 10
     unlock_min: float = 30
     usb_unlock_min: float = 30
+    flash_code_len: int = 40
+    flash_code_period_min: float = 2
     # Не хранится в файле: выставляет только профиль --test.
     test_mode: bool = False
 
@@ -71,7 +73,9 @@ DEFAULT_TEXTS = {
     "night_code_button": "Проверить код",
     "night_code_wrong": "Код не совпал. Набери ещё раз.",
     "night_wait": "Разблокировка через {left}",
-    "night_usb_hint": "Вставь флешку с ключом, чтобы открыть экран на {minutes} минут.",
+    "flash_label": "Код с флешки",
+    "flash_timer": "Новый код через {left}",
+    "flash_missing": "Вставь флешку с ключом, чтобы увидеть код",
     "tray_break": "До перерыва: {min} мин",
     "tray_night": "Ночной режим до {morning}",
     "tray_stats": "Статистика за сегодня",
