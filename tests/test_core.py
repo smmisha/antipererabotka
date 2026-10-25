@@ -397,6 +397,18 @@ def test_counter_is_restored_only_from_a_fresh_heartbeat():
     assert restored_active(50.0, now - timedelta(hours=7), now, 5) == 0.0
 
 
+def test_idle_during_a_break_does_not_close_it():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    t.run(3600)
+    assert core.break_visible
+    events = t.run(10 * 60, idle=600)
+    assert core.break_visible
+    assert "idle_break" not in kinds(events)
+    t.run(60)
+    assert kinds(core.water_drunk(t.now)) == ["water_drunk"]
+
+
 def test_test_escape_releases_the_night_lock():
     core = Core(short_settings(), datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))

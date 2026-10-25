@@ -207,7 +207,8 @@ class Core:
             self._night_tick(now, resumed, ev)
         elif self._night_key is not None:
             self._end_night(now, ev)
-        if idle_s >= self.s.idle_reset_min * 60:
+        if idle_s >= self.s.idle_reset_min * 60 and self.break_since is None:
+            # Перерыв на экране простой не закрывает: отметку «Вода выпита» ставят по возвращении.
             if self.active_s > 0:
                 ev.append(Event("idle_break", now, {"stretch_s": round(self.active_s)}))
             self._end_break()
