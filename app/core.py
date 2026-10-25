@@ -186,7 +186,6 @@ class Core:
         in_night = self.in_night(now)
         dt, resumed = self._check_time(now, ticks_ms, wall, in_night, ev)
         if in_night:
-            self.break_since = None
             self._night_tick(now, resumed, ev)
         elif self._night_key is not None:
             self._end_night(now, ev)
@@ -227,6 +226,9 @@ class Core:
             self._night_key = night.report
             self._night_started = False
             self._slept = False
+            if self.break_since is not None:
+                ev.append(Event("break_cancelled", now, {"reason": "night"}))
+            self._end_break()
         if now >= night.report and self._report_for != night.report:
             self._report_for = night.report
             if now < night.lock:

@@ -340,6 +340,27 @@ def test_test_mode_never_sleeps():
     assert not core.take_sleep()
 
 
+def test_break_on_screen_is_cancelled_when_the_night_starts():
+    core = Core(NORMAL, datetime(2026, 10, 26, 1, 44, 30))
+    core.restore_active(3600)
+    t = Ticker(core, datetime(2026, 10, 26, 1, 44, 30))
+    assert core.break_visible
+    events = t.run(60)
+    assert not core.break_visible
+    assert [(e.kind, e.payload) for e in events if e.kind == "break_cancelled"] == [
+        ("break_cancelled", {"reason": "night"})
+    ]
+
+
+def test_no_break_right_after_the_morning():
+    core = Core(NORMAL, datetime(2026, 10, 26, 1, 40))
+    core.restore_active(3550)
+    t = Ticker(core, datetime(2026, 10, 26, 1, 40))
+    t.run(6 * 3600 + 21 * 60)
+    assert not core.break_visible
+    assert core.active_s < 3600
+
+
 def test_test_escape_releases_the_night_lock():
     core = Core(short_settings(), datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))
