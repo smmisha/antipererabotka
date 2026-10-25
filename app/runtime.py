@@ -14,6 +14,7 @@ from pathlib import Path
 from . import config, report, winapi
 from .config import Config, Settings
 from .core import Core, Event, bypass_event, flash_code as make_flash_code, flash_window, key_matches
+from .failsafe import ErrorThrottle, FailCounter
 from .storage import Storage
 from .tray import Tray
 from .ui_lock import LockScreen
@@ -83,6 +84,8 @@ class Runtime:
         self._unflushed = 0.0
         self._report_day = None
         self._report_data = None
+        self._failsafe = FailCounter()
+        self._throttle = ErrorThrottle()
 
     def start(self) -> None:
         now = datetime.now()
@@ -118,9 +121,24 @@ class Runtime:
     def _loop(self) -> None:
         try:
             self._step()
+            self._failsafe.ok()
         except Exception:
             self._record_error()
+            if self._failsafe.fail():
+                self._trip_failsafe()
         self.root.after(TICK_MS, self._loop)
+
+    def _trip_failsafe(self) -> None:
+        """Десять сбоев подряд: блокировка снята, хук клавиатуры остановлен, в трее сообщение."""
+        self.lock.hide()
+        self.report.hide()
+        if self.guard.active:
+            self.guard.stop()
+        self.tray.set_title(self.cfg.texts["tray_failsafe"])
+        try:
+            self.storage.log([Event("failsafe", datetime.now(), {"reason": "10 сбоев подряд"})])
+        except Exception:
+            pass  # журнал тоже мог сломаться: причина уже записана в error.log
 
     def _step(self) -> None:
         now = datetime.now()
@@ -252,7 +270,11 @@ class Runtime:
             self.core.request_settings(fresh.settings, now)
 
     def _record_error(self) -> None:
-        self._log_error_text(traceback.format_exc())
+        text = traceback.format_exc()
+        write, repeats = self._throttle.should_write(text, time.monotonic())
+        if write:
+            suffix = f"\n(повторов за минуту: {repeats})" if repeats else ""
+            self._log_error_text(text + suffix)
 
     def _log_error_text(self, text: str) -> None:
         with open(self.data / "error.log", "a", encoding="utf-8") as log:

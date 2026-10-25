@@ -103,6 +103,7 @@ DEFAULT_TEXTS = {
     "tray_night": "Ночной режим до {morning}",
     "tray_stats": "Статистика за сегодня",
     "tray_settings": "Открыть настройки",
+    "tray_failsafe": "Ошибка: блокировка отключена, см. error.log",
     "first_run_title": "Антипереработка",
     "first_run": (
         "Перерыв на воду каждые {interval} мин активной работы.\n"
