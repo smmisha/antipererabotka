@@ -255,13 +255,18 @@ def test_code_alphabet_has_no_confusable_characters():
 
 # Обход и перевод часов
 
-def test_bypass_only_when_lock_was_not_unlocked():
+def test_bypass_only_when_the_lock_has_no_ending():
     now = datetime(2026, 10, 26, 3, 0)
-    assert bypass_event(now, "night", unlocked_since_prev=False).kind == "bypass"
-    assert bypass_event(now, "break", unlocked_since_prev=False).kind == "bypass"
-    assert bypass_event(now, "night", unlocked_since_prev=True) is None
-    assert bypass_event(now, "ok", unlocked_since_prev=False) is None
-    assert bypass_event(now, None, unlocked_since_prev=False) is None
+    assert bypass_event(now, "night", ended_since_prev=False).kind == "bypass"
+    assert bypass_event(now, "break", ended_since_prev=False).kind == "bypass"
+    assert bypass_event(now, "night", ended_since_prev=True) is None
+    assert bypass_event(now, "ok", ended_since_prev=False) is None
+    assert bypass_event(now, None, ended_since_prev=False) is None
+
+
+def test_reboot_during_lock_is_not_a_bypass():
+    now = datetime(2026, 10, 26, 3, 0)
+    assert bypass_event(now, "night", ended_since_prev=False, rebooted=True).kind == "restart_during_lock"
 
 
 def test_clock_jump_at_night_is_bypass():

@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS heartbeat (
 """
 
 
+# События, которые означают штатный конец блокировки после heartbeat.
+ENDING_KINDS = ("unlock", "water_drunk", "break_snoozed", "idle_break", "night_lock_end", "test_exit", "break_cancelled")
+
+
 def _ts(at: datetime) -> str:
     return at.isoformat(timespec="seconds")
 
@@ -90,8 +94,10 @@ class Storage:
             return None
         return datetime.fromisoformat(row[0]), row[1], row[2]
 
-    def unlocked_since(self, at: datetime) -> bool:
+    def ended_since(self, at: datetime) -> bool:
+        """Был ли после heartbeat штатный конец блокировки: любое из ENDING_KINDS."""
+        marks = ", ".join("?" for _ in ENDING_KINDS)
         row = self.db.execute(
-            "SELECT 1 FROM events WHERE kind = 'unlock' AND ts > ? LIMIT 1", (_ts(at),)
+            f"SELECT 1 FROM events WHERE ts >= ? AND kind IN ({marks}) LIMIT 1", (_ts(at), *ENDING_KINDS)
         ).fetchone()
         return row is not None

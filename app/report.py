@@ -21,6 +21,7 @@ class Summary:
     usb: int
     bypass: int
     clock: int
+    restart: int
 
 
 def _hhmm(text: str) -> timedelta:
@@ -58,6 +59,7 @@ def summary(store: Storage, day: date, s: Settings) -> Summary:
         usb=counts["unlock_usb"],
         bypass=counts["bypass"],
         clock=counts["clock_change"],
+        restart=counts["restart_during_lock"],
     )
 
 

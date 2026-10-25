@@ -80,6 +80,7 @@ class Runtime:
         self._cfg_mtime = self._mtime()
         self._cfg_checked = 0.0
         self._beat_at = 0.0
+        self._beat_state: str | None = None
         self._flush_at = 0.0
         self._unflushed = 0.0
         self._report_day = None
@@ -97,7 +98,7 @@ class Runtime:
         self.core = Core(self.settings, now)
         if last is not None:
             beat_at, state, active_s = last
-            bypass = bypass_event(now, state, self.storage.unlocked_since(beat_at))
+            bypass = bypass_event(now, state, self.storage.ended_since(beat_at), self._rebooted_since(beat_at))
             if bypass is not None:
                 events.append(bypass)
             self.core.restore_active(active_s)
@@ -105,6 +106,11 @@ class Runtime:
         self.roots = self._roots()
         self.tray.start()
         self.root.after(TICK_MS, self._loop)
+
+    def _rebooted_since(self, beat_at: datetime) -> bool:
+        """Windows загрузилась позже последнего heartbeat: время загрузки = time.time() - GetTickCount64."""
+        boot_at = time.time() - winapi.tick_ms() / 1000
+        return boot_at > beat_at.timestamp() + 60
 
     def shutdown(self) -> None:
         now = datetime.now()
@@ -181,9 +187,11 @@ class Runtime:
             self._flush_at = mono + FLUSH_S
             self.storage.add_active(now, self._unflushed)
             self._unflushed = 0.0
-        if mono >= self._beat_at:
+        state = self.core.heartbeat_state()
+        if state != self._beat_state or mono >= self._beat_at:
+            self._beat_state = state
             self._beat_at = mono + BEAT_S
-            self.storage.beat(now, self.core.heartbeat_state(), self.core.active_s)
+            self.storage.beat(now, state, self.core.active_s)
 
     # Действия пользователя (главный поток)
 
@@ -352,6 +360,7 @@ class Runtime:
                 t["stat_longest"].format(minutes=summary.longest_min),
                 t["stat_emergency"].format(n=summary.emergency),
                 t["stat_bypass"].format(n=summary.bypass),
+                t["stat_restart"].format(n=summary.restart),
             ],
             "week_title": t["stat_week"],
             "week": [(d.strftime("%d.%m"), hours) for d, hours in week],

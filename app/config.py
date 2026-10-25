@@ -88,6 +88,7 @@ DEFAULT_TEXTS = {
     "stat_longest": "Самый длинный отрезок без перерыва: {minutes} мин",
     "stat_emergency": "Экстренных разблокировок: {n}",
     "stat_bypass": "Обходов: {n}",
+    "stat_restart": "Перезагрузок в блокировке: {n}",
     "stat_week": "Активные часы за 7 дней",
     "night_title": "Пора спать. Разблокировка в {morning}",
     "night_now": "Сейчас {now}",

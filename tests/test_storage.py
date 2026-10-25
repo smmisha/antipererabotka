@@ -18,14 +18,22 @@ def test_events_round_trip(tmp_path):
     db.close()
 
 
-def test_heartbeat_and_unlock_after_it(tmp_path):
+def test_heartbeat_and_ending_after_it(tmp_path):
     db = make_store(tmp_path)
     assert db.last_beat() is None
     db.beat(datetime(2026, 10, 26, 2, 0, 10), "night", 120.0)
     assert db.last_beat() == (datetime(2026, 10, 26, 2, 0, 10), "night", 120.0)
-    assert not db.unlocked_since(datetime(2026, 10, 26, 2, 0, 10))
-    db.log([Event("unlock", datetime(2026, 10, 26, 2, 5), {"method": "usb"})])
-    assert db.unlocked_since(datetime(2026, 10, 26, 2, 0, 10))
+    assert not db.ended_since(datetime(2026, 10, 26, 2, 0, 10))
+    db.log([Event("unlock", datetime(2026, 10, 26, 2, 5), {"method": "usb_code"})])
+    assert db.ended_since(datetime(2026, 10, 26, 2, 0, 10))
+    db.close()
+
+
+def test_night_lock_end_after_a_heartbeat_is_an_ending(tmp_path):
+    db = make_store(tmp_path)
+    db.beat(datetime(2026, 10, 26, 0, 42, 19), "night", 50.0)
+    db.log([Event("night_lock_end", datetime(2026, 10, 26, 0, 42, 25))])
+    assert db.ended_since(datetime(2026, 10, 26, 0, 42, 19))
     db.close()
 
 

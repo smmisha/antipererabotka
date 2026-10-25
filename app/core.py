@@ -79,11 +79,13 @@ def key_matches(secret: str, expected_hash: str) -> bool:
     return hmac.compare_digest(key_hash(secret).encode(), expected_hash.encode())
 
 
-def bypass_event(now: datetime, prev_state: str | None, unlocked_since_prev: bool) -> Event | None:
-    """Приложение пропало во время блокировки, и штатной разблокировки не было."""
-    if prev_state in LOCK_STATES and not unlocked_since_prev:
-        return Event("bypass", now, {"reason": "restart", "was": prev_state})
-    return None
+def bypass_event(now: datetime, prev_state: str | None, ended_since_prev: bool, rebooted: bool = False) -> Event | None:
+    """Приложение пропало во время блокировки без штатного конца. После перезагрузки это restart_during_lock, а не обход."""
+    if prev_state not in LOCK_STATES or ended_since_prev:
+        return None
+    if rebooted:
+        return Event("restart_during_lock", now, {"was": prev_state})
+    return Event("bypass", now, {"reason": "restart", "was": prev_state})
 
 
 def flash_window(wall: float, period_s: float) -> int:
