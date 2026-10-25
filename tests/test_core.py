@@ -65,11 +65,35 @@ def test_idle_is_not_counted_and_resets_after_5_minutes():
     core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))
     t.run(600)
-    t.run(120, idle=60)
+    t.run(120, idle=150)
     assert core.active_s == 600
     events = t.run(1, idle=300)
     assert core.active_s == 0
     assert [(e.kind, e.payload) for e in events] == [("idle_break", {"stretch_s": 600})]
+
+
+def test_input_every_30_seconds_gives_a_break_after_60_minutes():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    t.run(3599, idle=29)
+    assert not core.break_visible
+    t.run(1, idle=29)
+    assert core.break_visible
+
+
+def test_four_minutes_without_input_count_only_two():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    for s in range(240):
+        t.now += timedelta(seconds=1)
+        t.ticks += 1000
+        t.wall += 1
+        core.tick(t.now, float(s), t.ticks, t.wall)
+    assert core.active_s == 120
+
+
+def test_test_profile_counts_activity_with_a_30_second_gap():
+    assert short_settings().active_gap_s == 30
 
 
 def test_water_button_waits_60_seconds_and_snooze_is_used_once():

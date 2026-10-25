@@ -15,7 +15,6 @@ from .config import Settings
 # Без похожих знаков: 0/O, 1/l/I и строчная o (похожа на 0).
 CODE_ALPHABET = "".join(c for c in string.ascii_letters + string.digits if c not in "0O1lIo")
 
-ACTIVE_IDLE_S = 5.0  # ввод был не позже 5 с назад: время считается активным
 MAX_STEP_S = 5.0  # больший шаг опроса значит сон или зависание: в активное время не идёт
 CLOCK_TOLERANCE_S = 120.0  # расхождение часов больше этого считаем переводом часов
 RESUME_GAP_S = 60.0  # опроса не было больше минуты: пробуждение
@@ -193,7 +192,7 @@ class Core:
             if self.active_s > 0:
                 ev.append(Event("idle_break", now, {"stretch_s": round(self.active_s)}))
             self._end_break()
-        elif not in_night and idle_s < ACTIVE_IDLE_S:
+        elif not in_night and idle_s < self.s.active_gap_s:
             self.active_s += dt
             self._unflushed_s += dt
         due = self.s.break_interval_min * 60

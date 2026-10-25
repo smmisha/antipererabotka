@@ -20,6 +20,7 @@ class Settings:
     break_min_lock_s: float = 60
     snooze_min: float = 10
     idle_reset_min: float = 5
+    active_gap_s: float = 120
     report_time: str = "01:45"
     reminder_time: str = "01:55"
     night_time: str = "02:00"
@@ -42,6 +43,7 @@ def short_settings() -> Settings:
         break_min_lock_s=15,
         snooze_min=0.5,
         idle_reset_min=1,
+        active_gap_s=30,
         emergency_wait_min=20 / 60,
         unlock_min=0.5,
         usb_unlock_min=0.5,
