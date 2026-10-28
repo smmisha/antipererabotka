@@ -266,15 +266,19 @@ class Runtime:
         mtime = self._mtime()
         if mtime == self._cfg_mtime:
             return
-        self._cfg_mtime = mtime
         try:
             fresh = config.load(self.cfg_path)
-        except OSError:
+        except OSError as exc:  # файл занят, например антивирусом: на следующей проверке прочитаем снова
+            write, _ = self._throttle.should_write(f"config.json: {exc}", mono)
+            if write:
+                self._log_error_text(f"config.json: {exc}")
             return
         except ValueError as exc:  # неверные значения или битый JSON: остаёмся на прежних настройках
+            self._cfg_mtime = mtime
             self.storage.log([Event("config_invalid", now, {"reason": str(exc)})])
             self._log_error_text(f"config.json: {exc}")
             return
+        self._cfg_mtime = mtime
         self.cfg = fresh
         if not self.test:
             self.core.request_settings(fresh.settings, now)
