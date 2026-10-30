@@ -1,10 +1,12 @@
-"""Windows через ctypes: простой, мониторы, клавиатурный хук, сон, mutex, съёмные диски."""
+"""Windows через ctypes и реестр: простой, мониторы, клавиатурный хук, сон, mutex, съёмные диски, звонок и медиа."""
 
 from __future__ import annotations
 
 import ctypes
 import os
+import subprocess
 import threading
+import winreg
 from ctypes import wintypes
 from pathlib import Path
 
@@ -14,6 +16,7 @@ powrprof = ctypes.WinDLL("powrprof", use_last_error=True)
 shcore = ctypes.WinDLL("shcore", use_last_error=True)
 
 KEY_FILE = "antipererabotka.key"
+CONSENT_STORE = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
 DRIVE_REMOVABLE = 2
 ERROR_ALREADY_EXISTS = 183
 WH_KEYBOARD_LL = 13
@@ -148,6 +151,88 @@ def suspend() -> bool:
 
 def monitor_off() -> None:
     user32.SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2)
+
+
+def in_use(start: int | None, stop: int | None) -> bool:
+    """Приложение держит устройство, если его последний доступ начался позже конца предыдущего. Конца нет — доступ идёт."""
+    return start is not None and (stop or 0) < start
+
+
+def _filetime(key, name: str) -> int | None:
+    try:
+        return int(winreg.QueryValueEx(key, name)[0])
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def _device_in_use(path: str, depth: int) -> bool:
+    """Смотрит сам раздел устройства и его подразделы: NonPackaged для обычных программ, остальные — приложения из Store."""
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path)
+    except OSError:
+        return False
+    with key:
+        if in_use(_filetime(key, "LastUsedTimeStart"), _filetime(key, "LastUsedTimeStop")):
+            return True
+        if depth == 0:
+            return False
+        i = 0
+        while True:
+            try:
+                name = winreg.EnumKey(key, i)
+            except OSError:  # подразделы кончились
+                return False
+            if _device_in_use(f"{path}\\{name}", depth - 1):
+                return True
+            i += 1
+
+
+def call_in_progress() -> bool:
+    """Микрофон или камера заняты приложением: идёт звонок. Windows ведёт журнал доступа по каждому приложению."""
+    return any(_device_in_use(f"{CONSENT_STORE}\\{device}", 2) for device in ("microphone", "webcam"))
+
+
+# Ставит на паузу то, что играет сейчас: браузер, Spotify, «Кино и ТВ». Это пауза, а не переключение, поэтому остановленное не запустится.
+PAUSE_MEDIA_SCRIPT = """
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+function Wait-WinRt($op, $type) {
+    $task = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+    $task.Wait(-1) | Out-Null
+    $task.Result
+}
+$manager = Wait-WinRt ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+$playing = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus]::Playing
+$paused = 0
+foreach ($session in $manager.GetSessions()) {
+    if ($session.GetPlaybackInfo().PlaybackStatus -eq $playing -and (Wait-WinRt ($session.TryPauseAsync()) ([bool]))) { $paused++ }
+}
+$paused
+"""
+
+
+def pause_media() -> int | None:
+    """Сколько медиасессий поставлено на паузу. None — не удалось: блокировка всё равно появится."""
+    try:
+        done = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", PAUSE_MEDIA_SCRIPT],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _pause_count(done.stdout) if done.returncode == 0 else None
+
+
+def _pause_count(output: str) -> int | None:
+    """Последняя строка вывода — число. Предупреждения PowerShell выше не мешают."""
+    lines = output.strip().splitlines()
+    return int(lines[-1]) if lines and lines[-1].strip().isdigit() else None
 
 
 def foreground(hwnd: int) -> None:

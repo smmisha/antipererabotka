@@ -17,13 +17,13 @@ class Ticker:
         self.wall = wall
         self.events = core.tick(now, 0.0, ticks, wall)
 
-    def run(self, seconds, idle=0.0, step=1.0):
+    def run(self, seconds, idle=0.0, step=1.0, in_call=False):
         events = []
         for _ in range(round(seconds / step)):
             self.now += timedelta(seconds=step)
             self.ticks += round(step * 1000)
             self.wall += step
-            events += self.core.tick(self.now, idle, self.ticks, self.wall)
+            events += self.core.tick(self.now, idle, self.ticks, self.wall, in_call=in_call)
         return events
 
 
@@ -96,14 +96,14 @@ def test_test_profile_counts_activity_with_a_30_second_gap():
     assert short_settings().active_gap_s == 30
 
 
-def test_water_button_waits_60_seconds_and_snooze_is_used_once():
+def test_water_button_waits_5_minutes_and_snooze_is_used_once():
     core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))
     t.run(3600)
     assert core.break_visible
     assert core.water_drunk(t.now) == []
     assert not core.snooze_available(t.now)
-    t.run(60)
+    t.run(300)
     assert core.snooze_available(t.now)
     assert kinds(core.snooze(t.now)) == ["break_snoozed"]
     assert not core.break_visible
@@ -111,9 +111,52 @@ def test_water_button_waits_60_seconds_and_snooze_is_used_once():
     t.run(600)
     assert core.break_visible
     assert not core.snooze_available(t.now)
-    t.run(60)
+    t.run(300)
     assert kinds(core.water_drunk(t.now)) == ["water_drunk"]
     assert core.active_s == 0
+
+
+def test_break_is_postponed_during_a_call():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    t.run(3599)
+    events = t.run(120, in_call=True)
+    assert not core.break_visible
+    assert [(e.kind, e.payload) for e in events if e.kind == "break_postponed"] == [
+        ("break_postponed", {"reason": "call"})
+    ]
+
+
+def test_postponed_break_comes_right_after_the_call():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    t.run(3600, in_call=True)
+    assert not core.break_visible
+    events = t.run(1)
+    assert core.break_visible
+    assert "break_shown" in kinds(events)
+
+
+def test_break_on_screen_goes_away_during_a_call_and_returns_after_it():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    core.restore_active(3600)
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    assert core.break_visible
+    events = t.run(1, in_call=True)
+    assert not core.break_visible
+    assert "break_postponed" in kinds(events)
+    events = t.run(1)
+    assert core.break_visible
+    assert "break_shown" in kinds(events)
+
+
+def test_night_lock_is_not_postponed_by_a_call():
+    core = Core(NORMAL, datetime(2026, 10, 26, 1, 59, 50))
+    t = Ticker(core, datetime(2026, 10, 26, 1, 59, 50))
+    events = t.run(20, in_call=True)
+    assert core.lock_visible
+    assert "night_lock_start" in kinds(events)
+    assert "break_postponed" not in kinds(events)
 
 
 def test_no_water_breaks_between_0145_and_0800():

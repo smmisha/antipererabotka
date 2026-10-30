@@ -38,7 +38,7 @@ class Settings:
     """Настройки из config.json. Единицы указаны в имени поля."""
 
     break_interval_min: float = 60
-    break_min_lock_s: float = 60
+    break_min_lock_s: float = 300
     snooze_min: float = 10
     idle_reset_min: float = 5
     active_gap_s: float = 120

@@ -77,6 +77,7 @@ class Runtime:
         self.roots: set[str] = set()
         self.flash_secret: str | None = None
         self._flash_root: str | None = None
+        self._lock_kind: str | None = None
         self._cfg_mtime = self._mtime()
         self._cfg_checked = 0.0
         self._beat_at = 0.0
@@ -150,7 +151,9 @@ class Runtime:
         now = datetime.now()
         self._reload_config(now)
         self._process_actions(now)
-        events = self.core.tick(now, winapi.idle_seconds(), winapi.tick_ms(), time.time())
+        events = self.core.tick(
+            now, winapi.idle_seconds(), winapi.tick_ms(), time.time(), in_call=winapi.call_in_progress()
+        )
         if self.core.lock_visible:  # съёмные диски и файл ключа ищем только на экране ночной блокировки
             self._update_flash(self._roots())
         else:
@@ -164,12 +167,15 @@ class Runtime:
 
     def _sync_ui(self, now: datetime) -> None:
         core = self.core
-        if core.break_visible:
+        kind = "break" if core.break_visible else "night" if core.lock_visible else None
+        if kind == "break":
             self.lock.show("break", self._break_view(now))
-        elif core.lock_visible:
+        elif kind == "night":
             self.lock.show("night", self._night_view(now))
         else:
             self.lock.hide()
+        appeared = kind is not None and kind != self._lock_kind
+        self._lock_kind = kind
         if core.report_open:
             self.report.show(self._report_view(now))
         else:
@@ -181,6 +187,8 @@ class Runtime:
         elif not wanted and self.guard.active:
             self.guard.stop()
         self.tray.set_title(self._tray_title(now))
+        if appeared:
+            self._pause_media(now)  # блокировка уже на экране и с перехватом клавиш: теперь музыка и видео
 
     def _persist(self, now: datetime) -> None:
         mono = time.monotonic()
@@ -243,6 +251,14 @@ class Runtime:
                     self._flash_root = root
                     self.flash_secret = text.strip()
                     return
+
+    def _pause_media(self, now: datetime) -> None:
+        """Музыку и видео на паузу. Во время звонка не трогаем: пауза сорвёт встречу."""
+        self.root.update_idletasks()  # окно блокировки сначала нарисуется, потом PowerShell (около 2 с)
+        if winapi.call_in_progress():
+            self.storage.log([Event("media_skipped", now, {"reason": "call"})])
+            return
+        self.storage.log([Event("media_pause", now, {"paused": winapi.pause_media()})])
 
     def _sleep(self, now: datetime) -> None:
         ok = winapi.suspend()

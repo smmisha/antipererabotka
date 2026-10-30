@@ -29,7 +29,7 @@ def test_settings_file_that_could_not_be_read_is_read_again(tmp_path, monkeypatc
     config.save(path, config.Config())
     rt = runtime_for(path, tmp_path)
 
-    changed = replace(config.Config(), settings=replace(Settings(), break_min_lock_s=300))
+    changed = replace(config.Config(), settings=replace(Settings(), break_min_lock_s=120))
     config.save(path, changed)
     os.utime(path, ns=(10**18, 10**18 + 10**9))  # время изменения точно другое, чем при первом чтении
 
@@ -50,4 +50,4 @@ def test_settings_file_that_could_not_be_read_is_read_again(tmp_path, monkeypatc
     rt._cfg_checked = 0.0
     rt._reload_config(now)  # следующая проверка читает файл снова
     assert rt.core._pending is not None
-    assert rt.core._pending[0].break_min_lock_s == 300
+    assert rt.core._pending[0].break_min_lock_s == 120

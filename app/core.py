@@ -130,6 +130,7 @@ class Core:
         self.break_since: datetime | None = None
         self.snoozed = False
         self.snooze_until: datetime | None = None
+        self._postponed = False
         self.report_open = False
         self.lock_since: datetime | None = None
         self.unlock_from: datetime | None = None
@@ -196,8 +197,9 @@ class Core:
         idle_s: float,
         ticks_ms: int,
         wall: float,
+        in_call: bool = False,
     ) -> list[Event]:
-        """ticks_ms — GetTickCount64, wall — time.time(), idle_s — секунды без ввода."""
+        """ticks_ms — GetTickCount64, wall — time.time(), idle_s — секунды без ввода, in_call — идёт звонок."""
         ev: list[Event] = self._events
         self._events = []
         self._apply_pending(now, ev)
@@ -215,13 +217,28 @@ class Core:
         elif not in_night and idle_s < self.s.active_gap_s:
             self.active_s += dt
             self._unflushed_s += dt
-        due = self.s.break_interval_min * 60
-        if not in_night and self.break_since is None and self.active_s >= due:
-            if self.snooze_until is None or now >= self.snooze_until:
-                self.break_since = now
-                self.snooze_until = None
-                ev.append(Event("break_shown", now))
+        self._schedule_break(now, in_night, in_call, ev)
         return ev
+
+    def _schedule_break(self, now: datetime, in_night: bool, in_call: bool, ev: list[Event]) -> None:
+        """Перерыв по расписанию. Во время звонка не показываем: если он на экране, снимаем, он вернётся после звонка."""
+        if in_call and not in_night and (self.break_since is not None or self._break_due(now, in_night)):
+            self.break_since = None
+            if not self._postponed:
+                self._postponed = True
+                ev.append(Event("break_postponed", now, {"reason": "call"}))
+            return
+        self._postponed = False
+        if self.break_since is None and self._break_due(now, in_night):
+            self.break_since = now
+            self.snooze_until = None
+            ev.append(Event("break_shown", now))
+
+    def _break_due(self, now: datetime, in_night: bool) -> bool:
+        """Пора показать перерыв: набрано активное время, ночи нет, отложенный «Отложить» уже вернулся."""
+        if in_night or self.active_s < self.s.break_interval_min * 60:
+            return False
+        return self.snooze_until is None or now >= self.snooze_until
 
     def _check_time(self, now: datetime, ticks_ms: int, wall: float, in_night: bool, ev: list[Event]) -> tuple[float, bool]:
         if self._last is None:

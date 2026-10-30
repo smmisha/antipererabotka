@@ -13,7 +13,7 @@ APP = Path(__file__).resolve().parents[1] / "app"
 def test_defaults_match_the_spec():
     s = Settings()
     assert s.break_interval_min == 60
-    assert s.break_min_lock_s == 60
+    assert s.break_min_lock_s == 300
     assert s.snooze_min == 10
     assert s.idle_reset_min == 5
     assert (s.report_time, s.reminder_time, s.night_time, s.morning_time) == ("01:45", "01:55", "02:00", "08:00")
