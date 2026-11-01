@@ -190,6 +190,7 @@ class Runtime:
             ai_active=ai_active,
             ai_names=ai_names,
         )
+        self._keep_awake()  # до сна: после конца режима Windows должна снова уметь уснуть
         if self.core.lock_visible:  # съёмные диски и файл ключа ищем только на экране ночной блокировки
             self._update_flash(self._roots())
         else:
@@ -199,7 +200,6 @@ class Runtime:
         if self.core.take_sleep():
             self._sleep(now)
         self._sync_ui(now)
-        self._keep_awake()
         self._persist(now)
 
     def _keep_awake(self) -> None:
