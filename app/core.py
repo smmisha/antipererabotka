@@ -197,10 +197,6 @@ class Core:
     def ai_mode(self) -> bool:
         return self._ai_mode
 
-    @property
-    def ai_seen(self) -> bool:
-        return self._ai_active
-
     def break_wait_left(self, now: datetime) -> float:
         if self.break_since is None:
             return 0.0
