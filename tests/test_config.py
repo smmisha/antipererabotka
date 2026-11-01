@@ -19,11 +19,15 @@ def test_defaults_match_the_spec():
     assert (s.report_time, s.reminder_time, s.night_time, s.morning_time) == ("01:45", "01:55", "02:00", "08:00")
     assert s.sleep_after_min == 10
     assert s.emergency_len == 40
-    assert s.emergency_wait_min == 10
+    assert s.emergency_wait_min == 60
     assert s.unlock_min == 30
     assert s.usb_unlock_min == 30
     assert s.flash_code_len == 40
     assert s.flash_code_period_min == 2
+    assert s.emergency_code_period_min == 2
+    assert s.flash_unlocks_per_night == 7
+    assert s.emergency_unlocks_per_night == 3
+    assert s.warn_before_lock_s == 60
     assert s.test_mode is False
 
 

@@ -159,6 +159,45 @@ def test_night_lock_is_not_postponed_by_a_call():
     assert "break_postponed" not in kinds(events)
 
 
+def test_call_postpones_a_break_at_most_60_minutes():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    t.run(3600, in_call=True)
+    assert not core.break_visible
+    t.run(3599, in_call=True)
+    assert not core.break_visible
+    events = t.run(1, in_call=True)
+    assert core.break_visible
+    assert [(e.kind, e.payload) for e in events if e.kind == "break_shown"] == [
+        ("break_shown", {"reason": "call_limit"})
+    ]
+
+
+def test_each_break_gets_its_own_call_limit():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    t.run(7200, in_call=True)
+    assert core.break_visible
+    t.run(300, in_call=True)
+    assert core.water_drunk(t.now)
+    t.run(3600, in_call=True)
+    assert not core.break_visible
+    t.run(3600, in_call=True)
+    assert core.break_visible
+
+
+def test_snoozing_a_forced_break_does_not_restart_the_call_limit():
+    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
+    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
+    t.run(7200, in_call=True)
+    t.run(300, in_call=True)
+    assert core.snooze(t.now)
+    t.run(599, in_call=True)
+    assert not core.break_visible
+    t.run(1, in_call=True)
+    assert core.break_visible
+
+
 def test_no_water_breaks_between_0145_and_0800():
     core = Core(NORMAL, datetime(2026, 10, 26, 1, 44))
     core.restore_active(3600)
@@ -264,31 +303,130 @@ def test_flash_code_unlocks_for_current_and_previous_window_only():
     t = Ticker(core, datetime(2026, 10, 26, 3, 0))
     window = flash_window(t.wall, 120)
     assert core.lock_visible
-    assert not core.flash_submit(t.now, t.wall, flash_code(secret, window - 2, 40), secret)
-    assert not core.flash_submit(t.now, t.wall, flash_code(secret, window, 40), None)
-    assert not core.flash_submit(t.now, t.wall, flash_code("cd" * 32, window, 40), secret)
-    assert core.flash_submit(t.now, t.wall, flash_code(secret, window - 1, 40), secret)
+    assert core.submit(t.now, t.wall, flash_code(secret, window - 2, 40), secret) == "wrong"
+    assert core.submit(t.now, t.wall, flash_code(secret, window, 40), None) == "wrong"
+    assert core.submit(t.now, t.wall, flash_code("cd" * 32, window, 40), secret) == "wrong"
+    assert core.submit(t.now, t.wall, flash_code(secret, window - 1, 40), secret) == ""
     events = t.run(1)
     assert [(e.kind, e.payload) for e in events if e.kind == "unlock"] == [("unlock", {"method": "usb_code"})]
     assert not core.lock_visible
 
 
-def test_emergency_code_waits_then_unlocks_for_30_minutes():
+def test_emergency_code_waits_an_hour_then_unlocks_for_30_minutes():
     core = Core(NORMAL, datetime(2026, 10, 26, 2, 0))
     t = Ticker(core, datetime(2026, 10, 26, 2, 0))
     code = core.emergency_code
     assert len(code) == 40
     assert set(code) <= set(CODE_ALPHABET)
-    assert not core.emergency_submit(t.now, "wrong")
-    assert core.emergency_submit(t.now, " " + code + " ")
+    assert core.submit(t.now, t.wall, "wrong", None) == "wrong"
+    assert core.submit(t.now, t.wall, " " + code + " ", None) == ""
     assert core.lock_visible
-    events = t.run(10 * 60)
+    events = t.run(60 * 60 - 1)
+    assert "unlock" not in kinds(events)
+    events = t.run(1)
     assert [(e.kind, e.payload) for e in events if e.kind == "unlock"] == [("unlock", {"method": "emergency"})]
     t.run(30 * 60 - 1)
     assert not core.lock_visible
     t.run(1)
     assert core.lock_visible
     assert core.emergency_code != code
+
+
+def test_emergency_code_changes_every_2_minutes_and_the_previous_one_still_works():
+    core = Core(NORMAL, datetime(2026, 10, 26, 3, 0))
+    t = Ticker(core, datetime(2026, 10, 26, 3, 0))
+    first = core.emergency_code
+    t.run(120)
+    assert core.emergency_code != first
+    assert core.submit(t.now, t.wall, first, None) == ""
+
+
+def test_flash_unlocks_are_limited_to_seven_per_night():
+    secret = "ab" * 32
+    core = Core(NORMAL, datetime(2026, 10, 26, 3, 0))
+    t = Ticker(core, datetime(2026, 10, 26, 3, 0))
+    for _ in range(7):
+        window = flash_window(t.wall, 120)
+        assert core.submit(t.now, t.wall, flash_code(secret, window, 40), secret) == ""
+        t.run(30 * 60)
+        assert core.lock_visible
+    window = flash_window(t.wall, 120)
+    assert core.submit(t.now, t.wall, flash_code(secret, window, 40), secret) == "usb_limit"
+
+
+def test_emergency_unlocks_are_limited_to_three_per_night():
+    core = Core(NORMAL, datetime(2026, 10, 26, 2, 0))
+    t = Ticker(core, datetime(2026, 10, 26, 2, 0))
+    for _ in range(3):
+        assert core.submit(t.now, t.wall, core.emergency_code, None) == ""
+        t.run(90 * 60)
+        assert core.lock_visible
+    assert core.submit(t.now, t.wall, core.emergency_code, None) == "emergency_limit"
+
+
+def test_night_limits_start_again_on_the_next_night():
+    core = Core(NORMAL, datetime(2026, 10, 26, 2, 0))
+    t = Ticker(core, datetime(2026, 10, 26, 2, 0))
+    for _ in range(2):
+        assert core.submit(t.now, t.wall, core.emergency_code, None) == ""
+        t.run(90 * 60, step=30)
+    t.run(21 * 3600, step=60)
+    assert core.lock_visible
+    assert core.submit(t.now, t.wall, core.emergency_code, None) == ""
+    assert core.emergency_used == 1
+
+
+def test_warning_comes_one_minute_before_an_unlock_ends_once():
+    secret = "ab" * 32
+    core = Core(NORMAL, datetime(2026, 10, 26, 3, 0))
+    t = Ticker(core, datetime(2026, 10, 26, 3, 0))
+    window = flash_window(t.wall, 120)
+    assert core.submit(t.now, t.wall, flash_code(secret, window, 40), secret) == ""
+    events = t.run(29 * 60 - 1)
+    assert "lock_warning" not in kinds(events)
+    assert not core.warning_visible
+    events = t.run(1)
+    assert [(e.kind, e.payload) for e in events if e.kind == "lock_warning"] == [("lock_warning", {"method": "usb_code"})]
+    assert core.warning_visible
+    events = t.run(30)
+    assert "lock_warning" not in kinds(events)
+    t.run(29)
+    assert core.warning_visible
+    t.run(1)
+    assert not core.warning_visible
+    assert core.lock_visible
+
+
+def test_closed_warning_does_not_come_back():
+    secret = "ab" * 32
+    core = Core(NORMAL, datetime(2026, 10, 26, 3, 0))
+    t = Ticker(core, datetime(2026, 10, 26, 3, 0))
+    window = flash_window(t.wall, 120)
+    core.submit(t.now, t.wall, flash_code(secret, window, 40), secret)
+    t.run(29 * 60)
+    assert core.warning_visible
+    core.dismiss_warning()
+    assert not core.warning_visible
+    t.run(30)
+    assert not core.warning_visible
+
+
+def test_night_counts_from_the_journal_are_respected_after_a_restart():
+    core = Core(NORMAL, datetime(2026, 10, 26, 3, 0))
+    core.restore_night(datetime(2026, 10, 26, 1, 45), flash_used=0, emergency_used=3, accepted_at=None)
+    t = Ticker(core, datetime(2026, 10, 26, 3, 0))
+    assert core.lock_visible
+    assert core.submit(t.now, t.wall, core.emergency_code, None) == "emergency_limit"
+
+
+def test_pending_emergency_wait_survives_a_restart():
+    core = Core(NORMAL, datetime(2026, 10, 26, 2, 30))
+    accepted = datetime(2026, 10, 26, 2, 10)
+    core.restore_night(datetime(2026, 10, 26, 1, 45), flash_used=0, emergency_used=1, accepted_at=accepted)
+    t = Ticker(core, datetime(2026, 10, 26, 2, 30))
+    assert core.lock_visible
+    events = t.run(40 * 60)
+    assert [(e.kind, e.payload) for e in events if e.kind == "unlock"] == [("unlock", {"method": "emergency"})]
 
 
 def test_code_alphabet_has_no_confusable_characters():

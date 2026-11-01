@@ -25,8 +25,15 @@ RANGES = {
     "unlock_min": (1, 120),
     "usb_unlock_min": (1, 120),
     "flash_code_period_min": (1, 10),
+    "emergency_code_period_min": (1, 10),
+    "warn_before_lock_s": (60, 600),
 }
-INT_RANGES = {"emergency_len": (8, 80), "flash_code_len": (8, 80)}
+INT_RANGES = {
+    "emergency_len": (8, 80),
+    "flash_code_len": (8, 80),
+    "flash_unlocks_per_night": (1, 50),
+    "emergency_unlocks_per_night": (1, 50),
+}
 
 
 class ConfigError(ValueError):
@@ -48,11 +55,15 @@ class Settings:
     morning_time: str = "08:00"
     sleep_after_min: float = 10
     emergency_len: int = 40
-    emergency_wait_min: float = 10
+    emergency_wait_min: float = 60
+    emergency_code_period_min: float = 2
+    emergency_unlocks_per_night: int = 3
     unlock_min: float = 30
     usb_unlock_min: float = 30
+    flash_unlocks_per_night: int = 7
     flash_code_len: int = 40
     flash_code_period_min: float = 2
+    warn_before_lock_s: float = 60
     # Не хранится в файле: выставляет только профиль --test.
     test_mode: bool = False
 
@@ -68,6 +79,7 @@ def short_settings() -> Settings:
         emergency_wait_min=20 / 60,
         unlock_min=0.5,
         usb_unlock_min=0.5,
+        warn_before_lock_s=10,
         test_mode=True,
     )
 
@@ -98,6 +110,13 @@ DEFAULT_TEXTS = {
     "night_code_button": "Проверить код",
     "night_code_wrong": "Код не совпал. Набери ещё раз.",
     "night_wait": "Разблокировка через {left}",
+    "night_code_timer": "Новый код через {left}",
+    "night_limit_usb": "С флешкой на эту ночь разблокировки закончились",
+    "night_limit_emergency": "Без флешки на эту ночь разблокировки закончились",
+    "warn_title": "Скоро блокировка",
+    "warn_countdown": "Блокировка через {left}",
+    "warn_text": "Сохрани работу и закрой всё.",
+    "warn_button": "Понятно",
     "flash_label": "Код с флешки",
     "flash_timer": "Новый код через {left}",
     "flash_missing": "Вставь флешку с ключом, чтобы увидеть код",
