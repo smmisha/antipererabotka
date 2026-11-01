@@ -31,7 +31,16 @@ CREATE TABLE IF NOT EXISTS heartbeat (
 
 
 # События, которые означают штатный конец блокировки после heartbeat.
-ENDING_KINDS = ("unlock", "water_drunk", "break_snoozed", "idle_break", "night_lock_end", "test_exit", "break_cancelled")
+ENDING_KINDS = (
+    "unlock",
+    "water_drunk",
+    "break_snoozed",
+    "idle_break",
+    "night_lock_end",
+    "test_exit",
+    "break_cancelled",
+    "ai_mode_end",  # конец режима «ИИ» (тишина, ai_cap_time, разблокировка или утро) — штатный конец блокировки
+)
 
 
 def _ts(at: datetime) -> str:

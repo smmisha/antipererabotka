@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 
+from .ai_watch import QuietTimer
 from .config import Settings
 
 # Без похожих знаков: 0/O, 1/l/I и строчная o (похожа на 0).
@@ -20,6 +21,8 @@ CLOCK_TOLERANCE_S = 120.0  # расхождение часов больше эт
 RESUME_GAP_S = 60.0  # опроса не было больше минуты: пробуждение
 CALL_POSTPONE_MAX = timedelta(minutes=60)  # звонок откладывает перерыв не дольше этого, потом перерыв показывается и во время звонка
 TEST_NIGHT_MIN = (3.0, 3.5, 4.0, 6.0)  # тест: отчёт, напоминание, блокировка, утро (минуты от старта)
+TEST_AI_CAP_MIN = 8.0  # тест: режим «ИИ» заканчивается не позже этого (минуты от старта)
+FINAL_WARNING_S = 60.0  # за столько секунд до блокировки окно отчёта показывается снова
 LOCK_STATES = ("break", "night")
 
 
@@ -36,6 +39,7 @@ class Night:
     reminder: datetime
     lock: datetime
     morning: datetime
+    cap: datetime  # ai_cap_time: после него режим «ИИ» не работает
 
 
 def _clock(hhmm: str) -> timedelta:
@@ -59,13 +63,15 @@ def night_for(now: datetime, s: Settings, start: datetime | None = None) -> Nigh
     """Ночь дня, который идёт или будет идти. День длится от morning_time до следующего morning_time."""
     if s.test_mode:
         base = start or now
-        return Night(*(base + timedelta(minutes=m) for m in TEST_NIGHT_MIN))
+        report, reminder, lock, morning = (base + timedelta(minutes=m) for m in TEST_NIGHT_MIN)
+        return Night(report, reminder, lock, morning, base + timedelta(minutes=TEST_AI_CAP_MIN))
     day_start = logical_day_start(now, s)
     return Night(
         report=at_logical_day(day_start, s.report_time, s),
         reminder=at_logical_day(day_start, s.reminder_time, s),
         lock=at_logical_day(day_start, s.night_time, s),
         morning=day_start + timedelta(days=1),
+        cap=at_logical_day(day_start, s.ai_cap_time, s),
     )
 
 
@@ -156,6 +162,12 @@ class Core:
         self._last: tuple[int, float] | None = None
         self._unflushed_s = 0.0
         self._events: list[Event] = []
+        self.ai_request = False  # галочка «Сейчас в фоне работает ИИ», живёт одну ночь
+        self._ai_mode = False  # блокировка видна, но сон отложен
+        self._ai_active = False
+        self._ai_names: tuple[str, ...] = ()
+        self._quiet: QuietTimer | None = None
+        self._final_for: datetime | None = None
 
     def _random_code(self) -> str:
         return "".join(secrets.choice(CODE_ALPHABET) for _ in range(self.s.emergency_len))
@@ -180,6 +192,14 @@ class Core:
     @property
     def warning_visible(self) -> bool:
         return self._warning_on
+
+    @property
+    def ai_mode(self) -> bool:
+        return self._ai_mode
+
+    @property
+    def ai_seen(self) -> bool:
+        return self._ai_active
 
     def break_wait_left(self, now: datetime) -> float:
         if self.break_since is None:
@@ -210,11 +230,16 @@ class Core:
         ticks_ms: int,
         wall: float,
         in_call: bool = False,
+        ai_active: bool = False,
+        ai_names: tuple[str, ...] = (),
     ) -> list[Event]:
-        """ticks_ms — GetTickCount64, wall — time.time(), idle_s — секунды без ввода, in_call — идёт звонок."""
+        """ticks_ms — GetTickCount64, wall — time.time(), idle_s — секунды без ввода, in_call — идёт звонок,
+        ai_active — детектор видит ИИ, ai_names — процессы, которые он видит."""
         ev: list[Event] = self._events
         self._events = []
         self._apply_pending(now, ev)
+        self._ai_active = ai_active
+        self._ai_names = tuple(ai_names) if ai_active else ()
         in_night = self.in_night(now)
         dt, resumed = self._check_time(now, ticks_ms, wall, in_night, ev)
         if in_night:
@@ -286,6 +311,8 @@ class Core:
             self._slept = False
             self.flash_used = 0
             self.emergency_used = 0
+            self.ai_request = False  # галочка живёт одну ночь
+            self._ai_mode = False
             if self.break_since is not None:
                 ev.append(Event("break_cancelled", now, {"reason": "night"}))
             self._end_break()
@@ -298,6 +325,10 @@ class Core:
             self._reminder_for = night.reminder
             self.report_open = True
             ev.append(Event("reminder_shown", now))
+        if night.lock - timedelta(seconds=FINAL_WARNING_S) <= now < night.lock and self._final_for != night.report:
+            self._final_for = night.report
+            self.report_open = True  # окно отчёта снова на экране, если его закрыли
+            ev.append(Event("final_warning_shown", now))
         lock_due = now >= night.lock
         if self.wait_until is not None and now >= self.wait_until:
             self._unlock(now, "emergency", self.s.unlock_min, ev)
@@ -311,13 +342,15 @@ class Core:
             if not self._night_started:
                 self._night_started = True
                 ev.append(Event("night_lock_start", now))
+            self._ai_on_lock(now, night, ev)
         elif not visible and self._lock_shown:
             self._lock_shown = False
             self.lock_since = None
         elif visible and resumed:
             self.lock_since = now
             self._slept = False
-        if visible and not self._slept and not self.s.test_mode and self.lock_since is not None:
+        self._ai_check(now, night, ev)
+        if visible and not self._slept and not self.s.test_mode and self.lock_since is not None and not self._ai_mode:
             if now - self.lock_since >= timedelta(minutes=self.s.sleep_after_min):
                 self._slept = True
                 self.sleep_due = True
@@ -328,6 +361,7 @@ class Core:
     def _unlock(self, start: datetime, method: str, minutes: float, ev: list[Event]) -> None:
         self._begin_unlock(start, method, minutes)
         ev.append(Event("unlock", start, {"method": method}))
+        self._end_ai_mode(start, "unlock", ev)
 
     def _begin_unlock(self, start: datetime, method: str, minutes: float) -> None:
         self.unlock_from = start
@@ -348,6 +382,7 @@ class Core:
             ev.append(Event("lock_warning", now, {"method": self._unlock_method}))
 
     def _end_night(self, now: datetime, ev: list[Event]) -> None:
+        self._end_ai_mode(now, "morning", ev)
         if self._night_started:
             ev.append(Event("night_lock_end", now))
         self._night_key = None
@@ -356,6 +391,57 @@ class Core:
         self.lock_since = None
         self.report_open = False
         self.unlock_from = self.unlock_until = self.wait_until = None
+        self.ai_request = False
+
+    # Режим «ИИ работает ночью»
+
+    def set_ai_request(self, on: bool, now: datetime) -> None:
+        """Галочка «Сейчас в фоне работает ИИ» в окне отчёта. Ставится только до блокировки и только когда ИИ виден."""
+        if not self.s.ai_mode_enabled:
+            return
+        if not on:
+            if self.ai_request:
+                self.ai_request = False
+                self._events.append(Event("ai_mode_requested", now, {"on": False}))
+            return
+        night = self.night(now)
+        if self.ai_request or not night.report <= now < night.lock or not self._ai_active:
+            return
+        self.ai_request = True
+        self._events.append(Event("ai_mode_requested", now, {"on": True, "processes": list(self._ai_names)}))
+
+    def _ai_on_lock(self, now: datetime, night: Night, ev: list[Event]) -> None:
+        """Появилась блокировка: режим «ИИ» включается, только если галочка стоит, ИИ виден и ai_cap_time ещё не настал."""
+        if not self.ai_request:
+            return
+        if now >= night.cap:
+            ev.append(Event("ai_mode_not_started", now, {"reason": "cap"}))
+        elif self._ai_active:
+            self._ai_mode = True
+            self._quiet = QuietTimer(now)
+            ev.append(Event("ai_mode_start", now, {"processes": list(self._ai_names)}))
+        else:
+            ev.append(Event("ai_mode_not_started", now, {"reason": "no_ai"}))
+
+    def _ai_check(self, now: datetime, night: Night, ev: list[Event]) -> None:
+        """Пока режим «ИИ» идёт: тишина ai_quiet_min или ai_cap_time заканчивают его."""
+        if not self._ai_mode or self._quiet is None:
+            return
+        if self._quiet.update(now, self._ai_active) >= self.s.ai_quiet_min * 60:
+            self._end_ai_mode(now, "quiet", ev)
+        elif now >= night.cap:
+            self._end_ai_mode(now, "cap", ev)
+
+    def _end_ai_mode(self, at: datetime, reason: str, ev: list[Event]) -> None:
+        """Режим «ИИ» закончился. После тишины или ai_cap_time сон наступает сразу, без sleep_after_min."""
+        if not self._ai_mode:
+            return
+        self._ai_mode = False
+        self._quiet = None
+        ev.append(Event("ai_mode_end", at, {"reason": reason}))
+        if reason in ("quiet", "cap") and not self.s.test_mode:
+            self._slept = True
+            self.sleep_due = True
 
     def _end_break(self) -> None:
         self.active_s = 0.0
@@ -407,6 +493,7 @@ class Core:
             self.flash_used += 1
             self._begin_unlock(now, "usb_code", self.s.usb_unlock_min)
             self._events.append(Event("unlock", now, {"method": "usb_code"}))
+            self._end_ai_mode(now, "unlock", self._events)
             return ""
         if self.wait_until is None and self._emergency_matches(typed):
             if self.emergency_used >= self.s.emergency_unlocks_per_night:
