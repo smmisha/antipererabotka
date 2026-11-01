@@ -27,7 +27,7 @@ class LockScreen:
         *,
         on_water: Callable[[], None],
         on_snooze: Callable[[], None],
-        on_code: Callable[[str], bool],
+        on_code: Callable[[str], str],
         on_test_exit: Callable[[], None] | None = None,
     ) -> None:
         self.root = root
@@ -119,6 +119,7 @@ class LockScreen:
             "flash_timer": _label(frame, SMALL_FONT, WARN),
             "code_label": _label(frame, SMALL_FONT, MUTED),
             "code": _label(frame, CODE_FONT, FG),
+            "code_timer": _label(frame, SMALL_FONT, WARN),
             "hint": _label(frame, SMALL_FONT, MUTED),
             "entry": _entry(frame),
             "button": _button(frame, lambda: None),
@@ -137,8 +138,7 @@ class LockScreen:
     def _submit(self, entry: tk.Entry, message: tk.Label) -> None:
         text = entry.get()
         entry.delete(0, "end")
-        if not self.on_code(text):
-            message.config(text=self._view.get("wrong", ""))
+        message.config(text=self.on_code(text))
 
 
 def _label(frame: tk.Frame, font: tuple, fg: str) -> tk.Label:
@@ -196,8 +196,6 @@ def _update_break(w: dict, view: dict) -> None:
 
 def _update_night(w: dict, view: dict) -> None:
     waiting = bool(view["wait"])
-    if w["code"].cget("text") != view["code"]:
-        w["message"].config(text="")
     w["title"].config(text=view["title"])
     w["now"].config(text=view["now"])
     w["flash_label"].config(text=view["flash_label"])
@@ -205,11 +203,12 @@ def _update_night(w: dict, view: dict) -> None:
     w["flash_timer"].config(text=view["flash_timer"])
     w["code_label"].config(text=view["code_label"])
     w["code"].config(text=view["code"])
+    w["code_timer"].config(text=view["code_timer"])
     w["hint"].config(text=view["hint"])
     w["button"].config(text=view["button"])
     w["wait"].config(text=view["wait"])
     w["banner"].config(text=view["banner"])
-    for name in ("flash_label", "flash_code", "flash_timer", "code_label", "code", "hint", "entry", "button"):
+    for name in ("flash_label", "flash_code", "flash_timer", "code_label", "code", "code_timer", "hint", "entry", "button"):
         _toggle(w[name], not waiting)
     _toggle(w["flash_code"], not waiting and bool(view["flash_code"]))
     _toggle(w["flash_timer"], not waiting and bool(view["flash_timer"]))

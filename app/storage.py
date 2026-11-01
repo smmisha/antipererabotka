@@ -64,6 +64,15 @@ class Storage:
         ).fetchall()
         return [(datetime.fromisoformat(ts), kind, json.loads(payload)) for ts, kind, payload in rows]
 
+    def events_since(self, kinds: tuple[str, ...], since: datetime) -> list[tuple[datetime, str, dict]]:
+        """События перечисленных видов, начиная с since. Нужны, чтобы после перезапуска вернуть счётчики ночи."""
+        marks = ", ".join("?" for _ in kinds)
+        rows = self.db.execute(
+            f"SELECT ts, kind, payload FROM events WHERE ts >= ? AND kind IN ({marks}) ORDER BY ts, id",
+            (_ts(since), *kinds),
+        ).fetchall()
+        return [(datetime.fromisoformat(ts), kind, json.loads(payload)) for ts, kind, payload in rows]
+
     def add_active(self, at: datetime, secs: float) -> None:
         if secs <= 0:
             return

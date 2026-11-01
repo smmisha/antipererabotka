@@ -18,6 +18,7 @@ CODE_ALPHABET = "".join(c for c in string.ascii_letters + string.digits if c not
 MAX_STEP_S = 5.0  # больший шаг опроса значит сон или зависание: в активное время не идёт
 CLOCK_TOLERANCE_S = 120.0  # расхождение часов больше этого считаем переводом часов
 RESUME_GAP_S = 60.0  # опроса не было больше минуты: пробуждение
+CALL_POSTPONE_MAX = timedelta(minutes=60)  # звонок откладывает перерыв не дольше этого, потом перерыв показывается и во время звонка
 TEST_NIGHT_MIN = (3.0, 3.5, 4.0, 6.0)  # тест: отчёт, напоминание, блокировка, утро (минуты от старта)
 LOCK_STATES = ("break", "night")
 
@@ -130,13 +131,20 @@ class Core:
         self.break_since: datetime | None = None
         self.snoozed = False
         self.snooze_until: datetime | None = None
-        self._postponed = False
+        self._postponed_since: datetime | None = None
         self.report_open = False
         self.lock_since: datetime | None = None
         self.unlock_from: datetime | None = None
         self.unlock_until: datetime | None = None
         self.wait_until: datetime | None = None
         self.emergency_code = self._make_code()
+        self._emergency_prev: str | None = None
+        self._emergency_window: int | None = None
+        self.flash_used = 0
+        self.emergency_used = 0
+        self._unlock_method = ""
+        self._warned = False
+        self._warning_on = False
         self.sleep_due = False
         self._lock_shown = False
         self._slept = False
@@ -168,6 +176,10 @@ class Core:
     @property
     def break_visible(self) -> bool:
         return self.break_since is not None
+
+    @property
+    def warning_visible(self) -> bool:
+        return self._warning_on
 
     def break_wait_left(self, now: datetime) -> float:
         if self.break_since is None:
@@ -206,9 +218,12 @@ class Core:
         in_night = self.in_night(now)
         dt, resumed = self._check_time(now, ticks_ms, wall, in_night, ev)
         if in_night:
-            self._night_tick(now, resumed, ev)
+            self._night_tick(now, resumed, wall, ev)
         elif self._night_key is not None:
             self._end_night(now, ev)
+        if self._lock_shown:
+            self._rotate_emergency(wall)
+        self._warn_before_lock(now, ev)
         if idle_s >= self.s.idle_reset_min * 60 and self.break_since is None:
             # Перерыв на экране простой не закрывает: отметку «Вода выпита» ставят по возвращении.
             if self.active_s > 0:
@@ -221,14 +236,21 @@ class Core:
         return ev
 
     def _schedule_break(self, now: datetime, in_night: bool, in_call: bool, ev: list[Event]) -> None:
-        """Перерыв по расписанию. Во время звонка не показываем: если он на экране, снимаем, он вернётся после звонка."""
-        if in_call and not in_night and (self.break_since is not None or self._break_due(now, in_night)):
-            self.break_since = None
-            if not self._postponed:
-                self._postponed = True
+        """Перерыв по расписанию. Звонок его откладывает, но на один перерыв не дольше CALL_POSTPONE_MAX."""
+        if in_call and not in_night:
+            if self.break_since is None and not self._break_due(now, in_night):
+                return  # отсрочку держим, пока перерыв не закончился, в том числе отложенный «Отложить»
+            if self._postponed_since is None:
+                self._postponed_since = now
                 ev.append(Event("break_postponed", now, {"reason": "call"}))
+            if now - self._postponed_since < CALL_POSTPONE_MAX:
+                self.break_since = None
+            elif self.break_since is None:
+                self.break_since = now
+                self.snooze_until = None
+                ev.append(Event("break_shown", now, {"reason": "call_limit"}))
             return
-        self._postponed = False
+        self._postponed_since = None
         if self.break_since is None and self._break_due(now, in_night):
             self.break_since = now
             self.snooze_until = None
@@ -256,12 +278,14 @@ class Core:
             return dt, False
         return dt, d_wall > RESUME_GAP_S
 
-    def _night_tick(self, now: datetime, resumed: bool, ev: list[Event]) -> None:
+    def _night_tick(self, now: datetime, resumed: bool, wall: float, ev: list[Event]) -> None:
         night = self.night(now)
         if night.report != self._night_key:
             self._night_key = night.report
             self._night_started = False
             self._slept = False
+            self.flash_used = 0
+            self.emergency_used = 0
             if self.break_since is not None:
                 ev.append(Event("break_cancelled", now, {"reason": "night"}))
             self._end_break()
@@ -283,7 +307,7 @@ class Core:
             self.report_open = False
             self.lock_since = now
             self._slept = False
-            self.emergency_code = self._make_code()
+            self._rotate_emergency(wall, fresh=True)
             if not self._night_started:
                 self._night_started = True
                 ev.append(Event("night_lock_start", now))
@@ -302,10 +326,26 @@ class Core:
         return self.unlock_from is not None and self.unlock_from <= now < self.unlock_until
 
     def _unlock(self, start: datetime, method: str, minutes: float, ev: list[Event]) -> None:
+        self._begin_unlock(start, method, minutes)
+        ev.append(Event("unlock", start, {"method": method}))
+
+    def _begin_unlock(self, start: datetime, method: str, minutes: float) -> None:
         self.unlock_from = start
         self.unlock_until = start + timedelta(minutes=minutes)
         self.wait_until = None
-        ev.append(Event("unlock", start, {"method": method}))
+        self._unlock_method = method
+        self._warned = False
+        self._warning_on = False
+
+    def _warn_before_lock(self, now: datetime, ev: list[Event]) -> None:
+        """За warn_before_lock_s до конца разблокировки: предупреждение один раз, потом экран заблокируется."""
+        if not self._unlocked(now):
+            self._warning_on = False
+            return
+        if not self._warned and self.unlock_until - now <= timedelta(seconds=self.s.warn_before_lock_s):
+            self._warned = True
+            self._warning_on = True
+            ev.append(Event("lock_warning", now, {"method": self._unlock_method}))
 
     def _end_night(self, now: datetime, ev: list[Event]) -> None:
         if self._night_started:
@@ -322,6 +362,7 @@ class Core:
         self.snoozed = False
         self.snooze_until = None
         self.break_since = None
+        self._postponed_since = None
 
     def _apply_pending(self, now: datetime, ev: list[Event]) -> None:
         if self._pending is not None and now >= self._pending[1]:
@@ -356,30 +397,58 @@ class Core:
     def open_report(self) -> None:
         self.report_open = True
 
-    def emergency_submit(self, now: datetime, typed: str) -> bool:
-        """True — код верный, начат отсчёт. Новый код появится при следующем показе блокировки."""
-        if not self._lock_shown or self.wait_until is not None:
-            return False
-        if not hmac.compare_digest(typed.strip().encode(), self.emergency_code.encode()):
-            return False
-        self.wait_until = now + timedelta(minutes=self.s.emergency_wait_min)
-        self.emergency_code = self._make_code()
-        return True
+    def submit(self, now: datetime, wall: float, typed: str, secret: str | None) -> str:
+        """Введённый код: сначала флешка, потом резервный. '' — принят. Иначе причина: usb_limit, emergency_limit или wrong."""
+        if not self._lock_shown:
+            return "wrong"
+        if secret and self._flash_matches(wall, typed, secret):
+            if self.flash_used >= self.s.flash_unlocks_per_night:
+                return "usb_limit"
+            self.flash_used += 1
+            self._begin_unlock(now, "usb_code", self.s.usb_unlock_min)
+            self._events.append(Event("unlock", now, {"method": "usb_code"}))
+            return ""
+        if self.wait_until is None and self._emergency_matches(typed):
+            if self.emergency_used >= self.s.emergency_unlocks_per_night:
+                return "emergency_limit"
+            self.emergency_used += 1
+            self.wait_until = now + timedelta(minutes=self.s.emergency_wait_min)
+            self._rotate_emergency(wall, fresh=True)
+            self._events.append(Event("emergency_accepted", now))
+            return ""
+        return "wrong"
 
-    def flash_submit(self, now: datetime, wall: float, typed: str, secret: str | None) -> bool:
-        """Код с флешки: принимаются текущее и предыдущее окно. Без секрета (флешки в порту) не принимается."""
-        if not self._lock_shown or not secret:
-            return False
+    def _flash_matches(self, wall: float, typed: str, secret: str) -> bool:
+        """Принимаются текущее и предыдущее окно."""
         window = flash_window(wall, self.s.flash_code_period_min * 60)
         given = typed.strip().encode()
-        for w in (window, window - 1):
-            if hmac.compare_digest(given, flash_code(secret, w, self.s.flash_code_len).encode()):
-                self.unlock_from = now
-                self.unlock_until = now + timedelta(minutes=self.s.usb_unlock_min)
-                self.wait_until = None
-                self._events.append(Event("unlock", now, {"method": "usb_code"}))
-                return True
-        return False
+        codes = (flash_code(secret, w, self.s.flash_code_len) for w in (window, window - 1))
+        return any(hmac.compare_digest(given, code.encode()) for code in codes)
+
+    def _emergency_matches(self, typed: str) -> bool:
+        """Принимаются текущий и предыдущий резервный код, как у флешки."""
+        given = typed.strip().encode()
+        codes = (self.emergency_code, self._emergency_prev)
+        return any(code is not None and hmac.compare_digest(given, code.encode()) for code in codes)
+
+    def _rotate_emergency(self, wall: float, fresh: bool = False) -> None:
+        """Резервный код меняется каждые emergency_code_period_min минут. fresh — новый показ блокировки или принятый код."""
+        window = flash_window(wall, self.s.emergency_code_period_min * 60)
+        if fresh or window != self._emergency_window:
+            self._emergency_prev = None if fresh else self.emergency_code
+            self.emergency_code = self._make_code()
+            self._emergency_window = window
+
+    def restore_night(self, night_key: datetime, flash_used: int, emergency_used: int, accepted_at: datetime | None) -> None:
+        """После перезапуска счётчики ночи и ожидание резервного кода берутся из журнала: перезапуск не даёт новых попыток."""
+        self._night_key = night_key
+        self.flash_used = flash_used
+        self.emergency_used = emergency_used
+        if accepted_at is not None:
+            self.wait_until = accepted_at + timedelta(minutes=self.s.emergency_wait_min)
+
+    def dismiss_warning(self) -> None:
+        self._warning_on = False
 
     def test_escape(self, now: datetime) -> list[Event]:
         """Ctrl+Shift+F12 в тестовом режиме: снимает текущую блокировку."""

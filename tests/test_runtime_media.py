@@ -46,6 +46,7 @@ def runtime_with(core, journal):
     rt.storage = journal
     rt.lock = Quiet()
     rt.report = Quiet()
+    rt.warn = Quiet()
     rt.tray = Quiet()
     rt.guard = Quiet()
     rt._lock_kind = None
@@ -56,7 +57,9 @@ def runtime_with(core, journal):
 
 
 def screen(break_visible=False, lock_visible=False):
-    return SimpleNamespace(break_visible=break_visible, lock_visible=lock_visible, report_open=False)
+    return SimpleNamespace(
+        break_visible=break_visible, lock_visible=lock_visible, report_open=False, warning_visible=False
+    )
 
 
 def test_break_lock_pauses_media_once(monkeypatch):

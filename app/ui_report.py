@@ -64,6 +64,55 @@ class ReportWindow:
         self.win = win
 
 
+class WarningWindow:
+    """Предупреждение перед блокировкой: окно поверх остальных, ввод не перехватывает."""
+
+    def __init__(self, root: tk.Tk, on_close: Callable[[], None]) -> None:
+        self.root = root
+        self.on_close = on_close
+        self.win: tk.Toplevel | None = None
+        self._countdown: tk.Label | None = None
+
+    def show(self, view: dict) -> None:
+        if self.win is None:
+            self._build(view)
+        self._countdown.config(text=view["countdown"])
+
+    def hide(self) -> None:
+        if self.win is not None:
+            self.win.destroy()
+            self.win = None
+            self._countdown = None
+
+    def _build(self, view: dict) -> None:
+        win = tk.Toplevel(self.root)
+        win.title(view["title"])
+        win.configure(bg=BG)
+        win.attributes("-topmost", True)
+        win.resizable(False, False)
+        win.protocol("WM_DELETE_WINDOW", self.on_close)
+        body = tk.Frame(win, bg=BG, padx=36, pady=28)
+        body.pack()
+        _text(body, view["title"], REPORT_TITLE_FONT, WARN).pack(anchor="w")
+        _text(body, view["text"], TEXT_FONT, FG).pack(anchor="w", pady=(0, 12))
+        self._countdown = _text(body, "", TEXT_FONT, WARN)
+        self._countdown.pack(anchor="w")
+        tk.Button(
+            body,
+            text=view["button"],
+            font=TEXT_FONT,
+            bg=BUTTON,
+            fg=FG,
+            activebackground=BUTTON_ACTIVE,
+            activeforeground=FG,
+            relief="flat",
+            padx=30,
+            pady=10,
+            command=self.on_close,
+        ).pack(pady=(18, 0))
+        self.win = win
+
+
 def _text(frame: tk.Frame, text: str, font: tuple, fg: str) -> tk.Label:
     return tk.Label(frame, text=text, font=font, fg=fg, bg=BG, wraplength=520, justify="left")
 

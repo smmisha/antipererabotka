@@ -18,12 +18,14 @@ from .failsafe import ErrorThrottle, FailCounter
 from .storage import Storage
 from .tray import Tray
 from .ui_lock import LockScreen
-from .ui_report import ReportWindow
+from .ui_report import ReportWindow, WarningWindow
 
 TICK_MS = 1000
 BEAT_S = 10.0
 FLUSH_S = 30.0
 CONFIG_CHECK_S = 5.0
+NIGHT_CODE_KINDS = ("emergency_accepted", "unlock")  # по ним после перезапуска восстанавливаем попытки ночи
+NIGHT_MESSAGES = {"wrong": "night_code_wrong", "usb_limit": "night_limit_usb", "emergency_limit": "night_limit_emergency"}
 
 
 def _num(value: float) -> str:
@@ -66,6 +68,7 @@ class Runtime:
             on_test_exit=self.test_exit if test else None,
         )
         self.report = ReportWindow(root, on_close=self.report_closed)
+        self.warn = WarningWindow(root, on_close=self.warning_closed)
         self.tray = Tray(
             title="Антипереработка",
             stats_label=cfg.texts["tray_stats"],
@@ -103,6 +106,8 @@ class Runtime:
             if bypass is not None:
                 events.append(bypass)
             self.core.restore_active(restored_active(active_s, beat_at, now, self.settings.idle_reset_min))
+        if self.core.in_night(now):
+            self._restore_night(now)
         self.storage.log(events)
         self.roots = self._roots()
         self.tray.start()
@@ -112,6 +117,25 @@ class Runtime:
         """Windows загрузилась позже последнего heartbeat: время загрузки = time.time() - GetTickCount64."""
         boot_at = time.time() - winapi.tick_ms() / 1000
         return boot_at > beat_at.timestamp() + 60
+
+    def _restore_night(self, now: datetime) -> None:
+        """Попытки ночи берём из журнала: перезапуск не должен давать новые. Разблокировки до появления событий принятия тоже считаем."""
+        night = self.core.night(now)
+        flash = emergency = 0
+        accepted_at = None
+        for at, kind, payload in self.storage.events_since(NIGHT_CODE_KINDS, night.report):
+            method = payload.get("method")
+            if kind == "emergency_accepted":
+                emergency += 1
+                accepted_at = at
+            elif method == "usb_code":
+                flash += 1
+                accepted_at = None
+            elif method == "emergency":
+                if accepted_at is None:  # принятого кода в журнале нет: это старая запись, считаем разблокировку
+                    emergency += 1
+                accepted_at = None
+        self.core.restore_night(night.report, flash, emergency, accepted_at)
 
     def shutdown(self) -> None:
         now = datetime.now()
@@ -181,6 +205,10 @@ class Runtime:
         else:
             self.report.hide()
             self._report_data = None
+        if core.warning_visible:
+            self.warn.show(self._warning_view(now))
+        else:
+            self.warn.hide()
         wanted = core.break_visible or core.lock_visible
         if wanted and not self.guard.active:
             self.guard.start()
@@ -211,17 +239,19 @@ class Runtime:
     def snooze(self) -> None:
         self.storage.log(self.core.snooze(datetime.now()))
 
-    def emergency(self, typed: str) -> bool:
-        now = datetime.now()
-        if self.core.flash_submit(now, time.time(), typed, self.flash_secret):
-            return True
-        return self.core.emergency_submit(now, typed)
+    def emergency(self, typed: str) -> str:
+        """Код с флешки или резервный. Пустая строка — код принят, иначе текст для поля ввода."""
+        result = self.core.submit(datetime.now(), time.time(), typed, self.flash_secret)
+        return self.cfg.texts[NIGHT_MESSAGES[result]] if result else ""
 
     def test_exit(self) -> None:
         self.storage.log(self.core.test_escape(datetime.now()))
 
     def report_closed(self) -> None:
         self.core.report_closed()
+
+    def warning_closed(self) -> None:
+        self.core.dismiss_warning()
 
     def _process_actions(self, now: datetime) -> None:
         while True:
@@ -331,13 +361,14 @@ class Runtime:
     def _night_view(self, now: datetime) -> dict:
         t = self.cfg.texts
         core = self.core
+        wall = time.time()
         flash_label, flash_code, flash_timer = t["flash_missing"], "", ""
         if self.flash_secret is not None:
             period = core.s.flash_code_period_min * 60
-            wall = time.time()
             flash_label = t["flash_label"]
             flash_code = make_flash_code(self.flash_secret, flash_window(wall, period), core.s.flash_code_len)
             flash_timer = t["flash_timer"].format(left=_mmss(period - wall % period))
+        code_period = core.s.emergency_code_period_min * 60
         wait = ""
         if core.wait_until is not None:
             wait = t["night_wait"].format(left=_mmss((core.wait_until - now).total_seconds()))
@@ -349,11 +380,21 @@ class Runtime:
             "flash_timer": flash_timer,
             "code_label": t["night_code_label"],
             "code": core.emergency_code,
+            "code_timer": t["night_code_timer"].format(left=_mmss(code_period - wall % code_period)),
             "hint": t["night_code_hint"],
             "button": t["night_code_button"],
             "wait": wait,
-            "wrong": t["night_code_wrong"],
             "banner": self._banner(),
+        }
+
+    def _warning_view(self, now: datetime) -> dict:
+        t = self.cfg.texts
+        left = (self.core.unlock_until - now).total_seconds()
+        return {
+            "title": t["warn_title"],
+            "text": t["warn_text"],
+            "countdown": t["warn_countdown"].format(left=_mmss(left)),
+            "button": t["warn_button"],
         }
 
     def _report_view(self, now: datetime) -> dict:
