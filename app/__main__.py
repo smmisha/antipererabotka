@@ -9,7 +9,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
 
-from . import config, winapi
+from . import ai_watch, config, winapi
 from .core import key_hash, new_usb_secret, usb_key_allowed
 from .runtime import Runtime
 from .storage import Storage
@@ -48,14 +48,28 @@ def make_usb_key(target: str, test: bool) -> int:
     return 0
 
 
+def watch_ai() -> int:
+    """Калибровка порогов ИИ: без окон и блокировок, только запись CPU и IO в ai_watch.log тестовой папки."""
+    try:
+        ai_watch.watch(config.data_dir(True) / config.AI_LOG_NAME, lambda: winapi.ai_process_trees(config.AI_PROCESSES))
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app", description="Блокировка экрана для воды и сна.")
     parser.add_argument("--test", action="store_true", help="тестовый режим: короткие интервалы, отдельная база")
     parser.add_argument("--make-usb-key", metavar="ДИСК", help="создать USB-ключ, например E:")
     parser.add_argument("--test-key-dir", metavar="ПАПКА", help="тест: папка, которая считается съёмным диском")
+    parser.add_argument("--ai-watch", action="store_true", help="калибровка порогов ИИ: писать ai_watch.log (только с --test)")
     args = parser.parse_args(argv)
     if args.make_usb_key:
         return make_usb_key(args.make_usb_key, args.test)
+    if args.ai_watch:
+        if not args.test:
+            parser.error("--ai-watch работает только вместе с --test")
+        return watch_ai()
 
     data = config.data_dir(args.test)
     cfg_path = data / config.CONFIG_NAME

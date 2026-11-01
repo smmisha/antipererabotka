@@ -11,6 +11,9 @@ from pathlib import Path
 APP_DIR = "antipererabotka"
 CONFIG_NAME = "config.json"
 DB_NAME = "antipererabotka.sqlite3"
+AI_LOG_NAME = "ai_watch.log"  # журнал калибровки --test --ai-watch
+# Процессы ИИ-инструментов, имена без учёта регистра. node.exe и python.exe учитываются, только если в командной строке есть ИИ (см. ai_watch.counted_root).
+AI_PROCESSES = ("claude.exe", "Code.exe", "codex.exe", "Antigravity.exe", "node.exe", "python.exe")
 
 TIME_FIELDS = ("report_time", "reminder_time", "night_time", "morning_time")
 # Пределы значений из config.json. Значение вне пределов не применяется.

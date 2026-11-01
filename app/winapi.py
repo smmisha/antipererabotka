@@ -1,4 +1,4 @@
-"""Windows через ctypes и реестр: простой, мониторы, клавиатурный хук, сон, mutex, съёмные диски, звонок и медиа."""
+"""Windows через ctypes и реестр: простой, мониторы, клавиатурный хук, сон, mutex, съёмные диски, звонок, медиа и процессы ИИ."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import threading
 import winreg
 from ctypes import wintypes
 from pathlib import Path
+
+from . import ai_watch
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -190,6 +192,46 @@ def _device_in_use(path: str, depth: int) -> bool:
 def call_in_progress() -> bool:
     """Микрофон или камера заняты приложением: идёт звонок. Windows ведёт журнал доступа по каждому приложению."""
     return any(_device_in_use(f"{CONSENT_STORE}\\{device}", 2) for device in ("microphone", "webcam"))
+
+
+def ai_process_trees(names: tuple[str, ...]) -> list[ai_watch.Tree]:
+    """Деревья процессов из ai_processes: CPU и IO каждого процесса. Сам блокировщик и его потомки не считаем.
+    psutil импортируем здесь, чтобы тесты и запуск без него не падали. Недоступный процесс пропускаем."""
+    import psutil
+
+    wanted = {name.lower() for name in names}
+    me = psutil.Process()
+    own = {me.pid, *(child.pid for child in me.children(recursive=True))}
+
+    def cmdline(proc) -> str:
+        try:
+            return " ".join(proc.cmdline())
+        except psutil.Error:
+            return ""
+
+    def sample(proc) -> ai_watch.Proc | None:
+        try:
+            times = proc.cpu_times()
+            io = proc.io_counters()
+            return ai_watch.Proc((proc.pid, proc.create_time()), times.user + times.system, io.read_bytes + io.write_bytes)
+        except psutil.Error:
+            return None
+
+    trees: list[ai_watch.Tree] = []
+    for proc in psutil.process_iter(["name"]):
+        name = proc.info.get("name") or ""
+        if name.lower() not in wanted or proc.pid in own:
+            continue
+        try:
+            if not ai_watch.counted_root(name, cmdline(proc)):
+                continue
+            key = (name.lower(), proc.pid, proc.create_time())
+            members = [proc, *proc.children(recursive=True)]
+        except psutil.Error:
+            continue
+        samples = (sample(member) for member in members if member.pid not in own)
+        trees.append(ai_watch.Tree(key, name, tuple(s for s in samples if s is not None)))
+    return trees
 
 
 # Ставит на паузу то, что играет сейчас: браузер, Spotify, «Кино и ТВ». Это пауза, а не переключение, поэтому остановленное не запустится.
