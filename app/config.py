@@ -15,7 +15,7 @@ AI_LOG_NAME = "ai_watch.log"  # журнал калибровки --test --ai-wa
 # Процессы ИИ-инструментов, имена без учёта регистра. node.exe и python.exe учитываются, только если в командной строке есть ИИ (см. ai_watch.counted_root).
 AI_PROCESSES = ("claude.exe", "Code.exe", "codex.exe", "Antigravity.exe", "node.exe", "python.exe")
 
-TIME_FIELDS = ("report_time", "reminder_time", "night_time", "morning_time")
+TIME_FIELDS = ("report_time", "reminder_time", "night_time", "morning_time", "ai_cap_time")
 # Пределы значений из config.json. Значение вне пределов не применяется.
 RANGES = {
     "break_interval_min": (5, 240),
@@ -30,6 +30,10 @@ RANGES = {
     "flash_code_period_min": (1, 10),
     "emergency_code_period_min": (1, 10),
     "warn_before_lock_s": (60, 600),
+    "ai_quiet_min": (1, 60),
+    "ai_poll_s": (5, 60),
+    "ai_cpu_pct": (1, 100),
+    "ai_io_kb": (10, 100000),
 }
 INT_RANGES = {
     "emergency_len": (8, 80),
@@ -37,6 +41,8 @@ INT_RANGES = {
     "flash_unlocks_per_night": (1, 50),
     "emergency_unlocks_per_night": (1, 50),
 }
+BOOL_FIELDS = ("ai_mode_enabled",)
+AI_PROCESSES_MAX = 20
 
 
 class ConfigError(ValueError):
@@ -67,6 +73,14 @@ class Settings:
     flash_code_len: int = 40
     flash_code_period_min: float = 2
     warn_before_lock_s: float = 60
+    # Режим «ИИ работает ночью». Пороги ai_cpu_pct и ai_io_kb ориентировочные, см. калибровку в README.
+    ai_mode_enabled: bool = True
+    ai_quiet_min: float = 10  # тишина, после которой режим «ИИ» заканчивается
+    ai_cap_time: str = "04:00"  # режим «ИИ» заканчивается в это время, даже если ИИ работает
+    ai_poll_s: float = 15
+    ai_cpu_pct: float = 5  # загрузка дерева за 60 с, % одного ядра
+    ai_io_kb: float = 200  # прочитано и записано деревом за 60 с, КБ
+    ai_processes: tuple[str, ...] = AI_PROCESSES
     # Не хранится в файле: выставляет только профиль --test.
     test_mode: bool = False
 
@@ -83,6 +97,8 @@ def short_settings() -> Settings:
         unlock_min=0.5,
         usb_unlock_min=0.5,
         warn_before_lock_s=10,
+        ai_quiet_min=1,
+        ai_poll_s=5,
         test_mode=True,
     )
 
@@ -175,6 +191,16 @@ def _check_settings(section) -> dict:
             value = values[name]
             if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
                 raise ConfigError(f"{name}: целое от {lo} до {hi}, получено {value!r}")
+    for name in BOOL_FIELDS:
+        if name in values and not isinstance(values[name], bool):
+            raise ConfigError(f"{name}: true или false, получено {values[name]!r}")
+    if "ai_processes" in values:
+        procs = values["ai_processes"]
+        if not isinstance(procs, list) or not 1 <= len(procs) <= AI_PROCESSES_MAX or not all(
+            isinstance(p, str) and p.strip() for p in procs
+        ):
+            raise ConfigError(f"ai_processes: список имён из 1–{AI_PROCESSES_MAX} строк, получено {procs!r}")
+        values["ai_processes"] = tuple(procs)
     for name in TIME_FIELDS:
         if name in values:
             _minutes(values[name])
@@ -183,6 +209,9 @@ def _check_settings(section) -> dict:
     report, reminder, night = (((_minutes(t) - morning) % 1440) for t in (s.report_time, s.reminder_time, s.night_time))
     if not 0 < report <= reminder <= night < 1440:
         raise ConfigError("порядок времени: утро, отчёт, напоминание, блокировка, блокировка раньше следующего утра")
+    cap = (_minutes(s.ai_cap_time) - morning) % 1440
+    if not night < cap < 1440:
+        raise ConfigError("ai_cap_time: позже блокировки и раньше следующего утра")
     return values
 
 
