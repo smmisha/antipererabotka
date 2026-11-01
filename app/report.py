@@ -23,6 +23,7 @@ class Summary:
     bypass: int
     clock: int
     restart: int
+    ai_min: int
 
 
 def _hhmm(text: str) -> timedelta:
@@ -61,7 +62,24 @@ def summary(store: Storage, day: date, s: Settings) -> Summary:
         bypass=counts["bypass"],
         clock=counts["clock_change"],
         restart=counts["restart_during_lock"],
+        ai_min=ai_minutes(store, day, s),
     )
+
+
+def ai_minutes(store: Storage, day: date, s: Settings) -> int:
+    """Ночью работал ИИ: отрезки ai_mode_start → ai_mode_end от ночной блокировки перед этим днём до конца дня.
+    Отрезок без конца (журнал оборвался в режиме) не считаем."""
+    start, end = bounds(day, s)
+    night_start = at_logical_day(start - timedelta(days=1), s.night_time, s)
+    total = 0.0
+    since = None
+    for at, kind, _ in store.events(night_start, end):
+        if kind == "ai_mode_start":
+            since = at
+        elif kind == "ai_mode_end" and since is not None:
+            total += (at - since).total_seconds()
+            since = None
+    return round(total / 60)
 
 
 def week(store: Storage, today: date, s: Settings, days: int = 7) -> list[tuple[date, float]]:

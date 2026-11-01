@@ -14,6 +14,8 @@ WARN = "#f0b060"
 BUTTON = "#2d3440"
 BUTTON_ACTIVE = "#3b4555"
 CODE_BG = "#1e2229"
+DARK_BG = "#07080a"  # тёмный вид режима «ИИ»: спокойный экран без яркого света
+DARK_CODE_BG = "#101216"
 TITLE_FONT = ("Segoe UI", 36, "bold")
 TEXT_FONT = ("Segoe UI", 18)
 SMALL_FONT = ("Segoe UI", 13)
@@ -39,13 +41,16 @@ class LockScreen:
         self._view: dict = {}
         self._after: str | None = None
         self._entry: tk.Entry | None = None
+        self._dark = False
         if on_test_exit is not None:
             root.bind_all("<Control-Shift-F12>", lambda _event: on_test_exit())
 
     def show(self, mode: str, view: dict) -> None:
-        if self.mode != mode:
+        dark = mode == "night" and bool(view.get("ai_view"))  # режим «ИИ» — та же ночная блокировка, другой вид
+        if self.mode != mode or self._dark != dark:
             self.hide()
             self.mode = mode
+            self._dark = dark
             self._build(mode)
         self._view = view
         for _win, w in self._wins:
@@ -65,14 +70,15 @@ class LockScreen:
         self.mode = None
 
     def _build(self, mode: str) -> None:
+        bg = DARK_BG if self._dark else BG
         rects = winapi.monitor_rects() or [(0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())]
         for x, y, width, height in rects:
             win = tk.Toplevel(self.root)
             win.overrideredirect(True)
             win.geometry(f"{width}x{height}+{x}+{y}")
-            win.configure(bg=BG)
+            win.configure(bg=bg)
             win.attributes("-topmost", True)
-            frame = tk.Frame(win, bg=BG)
+            frame = tk.Frame(win, bg=bg)
             frame.pack(expand=True)
             if mode == "break":
                 widgets = self._break_widgets(frame)
@@ -111,21 +117,22 @@ class LockScreen:
         return w
 
     def _night_widgets(self, frame: tk.Frame) -> dict:
+        bg = DARK_BG if self._dark else BG
         w = {
-            "title": _label(frame, TITLE_FONT, FG),
-            "now": _label(frame, TEXT_FONT, MUTED),
-            "flash_label": _label(frame, SMALL_FONT, MUTED),
-            "flash_code": _label(frame, CODE_FONT, FG),
-            "flash_timer": _label(frame, SMALL_FONT, WARN),
-            "code_label": _label(frame, SMALL_FONT, MUTED),
-            "code": _label(frame, CODE_FONT, FG),
-            "code_timer": _label(frame, SMALL_FONT, WARN),
-            "hint": _label(frame, SMALL_FONT, MUTED),
-            "entry": _entry(frame),
+            "title": _label(frame, TEXT_FONT if self._dark else TITLE_FONT, FG, bg),
+            "now": _label(frame, TEXT_FONT, MUTED, bg),
+            "flash_label": _label(frame, SMALL_FONT, MUTED, bg),
+            "flash_code": _label(frame, CODE_FONT, FG, bg),
+            "flash_timer": _label(frame, SMALL_FONT, WARN, bg),
+            "code_label": _label(frame, SMALL_FONT, MUTED, bg),
+            "code": _label(frame, CODE_FONT, FG, bg),
+            "code_timer": _label(frame, SMALL_FONT, WARN, bg),
+            "hint": _label(frame, SMALL_FONT, MUTED, bg),
+            "entry": _entry(frame, DARK_CODE_BG if self._dark else CODE_BG),
             "button": _button(frame, lambda: None),
-            "message": _label(frame, SMALL_FONT, WARN),
-            "wait": _label(frame, TEXT_FONT, FG),
-            "banner": _label(frame, SMALL_FONT, MUTED),
+            "message": _label(frame, SMALL_FONT, WARN, bg),
+            "wait": _label(frame, TEXT_FONT, FG, bg),
+            "banner": _label(frame, SMALL_FONT, MUTED, bg),
         }
         entry = w["entry"]
         entry.bind("<FocusIn>", lambda _event, en=entry: setattr(self, "_entry", en))
@@ -141,8 +148,8 @@ class LockScreen:
         message.config(text=self.on_code(text))
 
 
-def _label(frame: tk.Frame, font: tuple, fg: str) -> tk.Label:
-    return tk.Label(frame, font=font, fg=fg, bg=BG, wraplength=1100, justify="center")
+def _label(frame: tk.Frame, font: tuple, fg: str, bg: str = BG) -> tk.Label:
+    return tk.Label(frame, font=font, fg=fg, bg=bg, wraplength=1100, justify="center")
 
 
 def _button(frame: tk.Frame, command: Callable[[], None]) -> tk.Button:
@@ -160,13 +167,13 @@ def _button(frame: tk.Frame, command: Callable[[], None]) -> tk.Button:
     )
 
 
-def _entry(frame: tk.Frame) -> tk.Entry:
+def _entry(frame: tk.Frame, bg: str = CODE_BG) -> tk.Entry:
     entry = tk.Entry(
         frame,
         font=CODE_FONT,
         width=44,
         justify="center",
-        bg=CODE_BG,
+        bg=bg,
         fg=FG,
         insertbackground=FG,
         relief="flat",
@@ -196,6 +203,7 @@ def _update_break(w: dict, view: dict) -> None:
 
 def _update_night(w: dict, view: dict) -> None:
     waiting = bool(view["wait"])
+    dark = bool(view.get("ai_view"))
     w["title"].config(text=view["title"])
     w["now"].config(text=view["now"])
     w["flash_label"].config(text=view["flash_label"])
@@ -208,10 +216,14 @@ def _update_night(w: dict, view: dict) -> None:
     w["button"].config(text=view["button"])
     w["wait"].config(text=view["wait"])
     w["banner"].config(text=view["banner"])
-    for name in ("flash_label", "flash_code", "flash_timer", "code_label", "code", "code_timer", "hint", "entry", "button"):
+    for name in ("flash_label", "flash_code", "flash_timer", "code_label", "code", "code_timer", "entry"):
         _toggle(w[name], not waiting)
     _toggle(w["flash_code"], not waiting and bool(view["flash_code"]))
     _toggle(w["flash_timer"], not waiting and bool(view["flash_timer"]))
+    # В тёмном виде одна строка текста и поле кода: без кнопки и подсказок, код вводится клавишей Enter.
+    _toggle(w["now"], not dark)
+    _toggle(w["hint"], not waiting and not dark)
+    _toggle(w["button"], not waiting and not dark)
     _toggle(w["message"], not waiting)
     _toggle(w["wait"], waiting)
     _toggle(w["banner"], bool(view["banner"]))

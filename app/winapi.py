@@ -46,6 +46,8 @@ kernel32.CreateMutexW.restype = wintypes.HANDLE
 kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
 kernel32.GetDriveTypeW.restype = wintypes.UINT
 kernel32.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
+kernel32.SetThreadExecutionState.restype = wintypes.DWORD
+kernel32.SetThreadExecutionState.argtypes = [wintypes.DWORD]
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.SetWindowsHookExW.restype = wintypes.HANDLE
@@ -75,6 +77,18 @@ class _KBDLLHOOKSTRUCT(ctypes.Structure):
 
 SEM_FAILCRITICALERRORS = 0x0001
 SEM_NOOPENFILEERRORBOX = 0x8000
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+_awake = False
+
+
+def keep_awake(on: bool) -> None:
+    """Пока идёт режим «ИИ», Windows сама не уходит в сон. Экран гасить не запрещаем: ES_DISPLAY_REQUIRED не ставим."""
+    global _awake
+    if on == _awake:
+        return
+    _awake = on
+    kernel32.SetThreadExecutionState(ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0))
 
 
 def set_error_mode() -> None:

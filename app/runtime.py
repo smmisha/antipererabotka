@@ -11,7 +11,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from . import config, report, winapi
+from . import ai_watch, config, report, winapi
 from .config import Config, Settings
 from .core import Core, Event, bypass_event, flash_code as make_flash_code, flash_window, key_matches, restored_active
 from .failsafe import ErrorThrottle, FailCounter
@@ -67,7 +67,7 @@ class Runtime:
             on_code=self.emergency,
             on_test_exit=self.test_exit if test else None,
         )
-        self.report = ReportWindow(root, on_close=self.report_closed)
+        self.report = ReportWindow(root, on_close=self.report_closed, on_ai=self.ai_request)
         self.warn = WarningWindow(root, on_close=self.warning_closed)
         self.tray = Tray(
             title="Антипереработка",
@@ -91,6 +91,9 @@ class Runtime:
         self._report_data = None
         self._failsafe = FailCounter()
         self._throttle = ErrorThrottle()
+        self._ai_watch: ai_watch.AiWatch | None = None
+        self._ai_next = 0.0  # когда опрашивать процессы ИИ снова (time.monotonic)
+        self._ai_last: tuple[bool, tuple[str, ...]] = (False, ())
 
     def start(self) -> None:
         now = datetime.now()
@@ -144,6 +147,7 @@ class Runtime:
             self.storage.beat(now, "stopped", self.core.active_s)
         self.storage.add_active(now, self._unflushed)
         self.storage.log([Event("app_stop", now)])
+        winapi.keep_awake(False)
         self.guard.stop()
         self.tray.stop()
 
@@ -163,6 +167,7 @@ class Runtime:
         """Десять сбоев подряд: блокировка снята, хук клавиатуры остановлен, в трее сообщение."""
         self.lock.hide()
         self.report.hide()
+        winapi.keep_awake(False)
         if self.guard.active:
             self.guard.stop()
         self.tray.set_title(self.cfg.texts["tray_failsafe"])
@@ -175,8 +180,15 @@ class Runtime:
         now = datetime.now()
         self._reload_config(now)
         self._process_actions(now)
+        ai_active, ai_names = self._poll_ai(now)
         events = self.core.tick(
-            now, winapi.idle_seconds(), winapi.tick_ms(), time.time(), in_call=winapi.call_in_progress()
+            now,
+            winapi.idle_seconds(),
+            winapi.tick_ms(),
+            time.time(),
+            in_call=winapi.call_in_progress(),
+            ai_active=ai_active,
+            ai_names=ai_names,
         )
         if self.core.lock_visible:  # съёмные диски и файл ключа ищем только на экране ночной блокировки
             self._update_flash(self._roots())
@@ -187,7 +199,12 @@ class Runtime:
         if self.core.take_sleep():
             self._sleep(now)
         self._sync_ui(now)
+        self._keep_awake()
         self._persist(now)
+
+    def _keep_awake(self) -> None:
+        """В режиме «ИИ» Windows сама не засыпает. Экран гасить можно: это не запрещено."""
+        winapi.keep_awake(self.core.ai_mode)
 
     def _sync_ui(self, now: datetime) -> None:
         core = self.core
@@ -233,6 +250,10 @@ class Runtime:
 
     # Действия пользователя (главный поток)
 
+    def ai_request(self, on: bool) -> None:
+        """Галочка «Сейчас в фоне работает ИИ» из окна отчёта."""
+        self.core.set_ai_request(on, datetime.now())
+
     def water_drunk(self) -> None:
         self.storage.log(self.core.water_drunk(datetime.now()))
 
@@ -263,6 +284,28 @@ class Runtime:
                 self.core.open_report()
             elif action == "settings":
                 subprocess.Popen(["notepad.exe", str(self.cfg_path)])
+
+    # Процессы ИИ
+
+    def _poll_ai(self, now: datetime) -> tuple[bool, tuple[str, ...]]:
+        """Процессы ИИ раз в ai_poll_s, только ночью и только если режим включён. Ошибка чтения — ИИ не виден:
+        блокировку она не снимает, а режим «ИИ» не включается. Ошибку пишем в error.log не чаще раза в минуту."""
+        s = self.core.s
+        if not s.ai_mode_enabled or not self.core.in_night(now):
+            return False, ()
+        mono = time.monotonic()
+        if mono < self._ai_next:
+            return self._ai_last
+        self._ai_next = mono + s.ai_poll_s
+        try:
+            if self._ai_watch is None or (self._ai_watch.cpu_pct, self._ai_watch.io_bytes) != (s.ai_cpu_pct, s.ai_io_kb * 1024):
+                self._ai_watch = ai_watch.AiWatch(s.ai_cpu_pct, s.ai_io_kb)
+            state = self._ai_watch.observe(ai_watch.Snapshot(mono, tuple(winapi.ai_process_trees(s.ai_processes))))
+            self._ai_last = (state.active, state.names)
+        except Exception:
+            self._ai_last = (False, ())
+            self._record_error()
+        return self._ai_last
 
     # Устройства и файлы
 
@@ -362,6 +405,8 @@ class Runtime:
         t = self.cfg.texts
         core = self.core
         wall = time.time()
+        morning = core.night(now).morning.strftime("%H:%M")
+        title = t["ai_dark"].format(morning=morning) if core.ai_mode else t["night_title"].format(morning=morning)
         flash_label, flash_code, flash_timer = t["flash_missing"], "", ""
         if self.flash_secret is not None:
             period = core.s.flash_code_period_min * 60
@@ -373,7 +418,8 @@ class Runtime:
         if core.wait_until is not None:
             wait = t["night_wait"].format(left=_mmss((core.wait_until - now).total_seconds()))
         return {
-            "title": t["night_title"].format(morning=core.night(now).morning.strftime("%H:%M")),
+            "title": title,
+            "ai_view": core.ai_mode,
             "now": t["night_now"].format(now=now.strftime("%H:%M:%S")),
             "flash_label": flash_label,
             "flash_code": flash_code,
@@ -425,11 +471,24 @@ class Runtime:
                 t["stat_usb"].format(n=summary.usb),
                 t["stat_bypass"].format(n=summary.bypass),
                 t["stat_restart"].format(n=summary.restart),
+                t["stat_ai"].format(n=summary.ai_min),
             ],
             "week_title": t["stat_week"],
             "week": [(d.strftime("%d.%m"), hours) for d, hours in week],
             "countdown": countdown,
+            "ai": self._ai_view() if core.s.ai_mode_enabled else None,
             "button": t["report_ok"],
+        }
+
+    def _ai_view(self) -> dict:
+        t = self.cfg.texts
+        active, names = self._ai_last
+        note = t["ai_detected"].format(names=ai_watch.ai_titles(names)) if active else t["ai_not_detected"]
+        return {
+            "checkbox": t["ai_checkbox"],
+            "checked": self.core.ai_request,
+            "enabled": active,
+            "note": note,
         }
 
     def _tray_title(self, now: datetime) -> str:

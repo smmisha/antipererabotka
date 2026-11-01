@@ -13,6 +13,15 @@ WINDOW_S = 60.0  # окно, за которое считаем загрузку
 # node.exe и python.exe — консольные агенты: считаем только если в командной строке есть одно из этих слов.
 CONSOLE_NAMES = ("node.exe", "python.exe")
 CONSOLE_WORDS = ("claude", "codex", "copilot", "gemini")
+# Как назвать найденный ИИ в окне отчёта. Неизвестное имя показываем как есть.
+AI_TITLES = {
+    "claude.exe": "Claude",
+    "code.exe": "VS Code",
+    "codex.exe": "Codex",
+    "antigravity.exe": "Antigravity",
+    "node.exe": "консольный агент",
+    "python.exe": "консольный агент",
+}
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,11 @@ def counted_root(name: str, cmdline: str) -> bool:
         return True
     text = cmdline.lower()
     return any(word in text for word in CONSOLE_WORDS)
+
+
+def ai_titles(names: tuple[str, ...]) -> str:
+    """Имена найденного ИИ для строки в окне отчёта, без повторов."""
+    return ", ".join(dict.fromkeys(AI_TITLES.get(name.lower(), name) for name in names))
 
 
 def _find(snap: Snapshot, key: tuple) -> Tree | None:

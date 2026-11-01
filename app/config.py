@@ -144,6 +144,11 @@ DEFAULT_TEXTS = {
     "tray_stats": "Статистика за сегодня",
     "tray_settings": "Открыть настройки",
     "tray_failsafe": "Ошибка: блокировка отключена, см. error.log",
+    "ai_checkbox": "Сейчас в фоне работает ИИ",
+    "ai_detected": "ИИ обнаружен: {names}",
+    "ai_not_detected": "ИИ сейчас не обнаружен",
+    "ai_dark": "ИИ работает. Ты спишь. Блокировка до {morning}",
+    "stat_ai": "Ночью работал ИИ: {n} мин",
     "first_run_title": "Антипереработка",
     "first_run": (
         "Перерыв на воду каждые {interval} мин активной работы.\n"

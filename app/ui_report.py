@@ -12,22 +12,57 @@ REPORT_TITLE_FONT = ("Segoe UI", 26, "bold")
 
 
 class ReportWindow:
-    def __init__(self, root: tk.Tk, on_close: Callable[[], None]) -> None:
+    def __init__(self, root: tk.Tk, on_close: Callable[[], None], on_ai: Callable[[bool], None]) -> None:
         self.root = root
         self.on_close = on_close
+        self.on_ai = on_ai
         self.win: tk.Toplevel | None = None
         self._countdown: tk.Label | None = None
+        self._ai_var: tk.BooleanVar | None = None
+        self._ai_check: tk.Checkbutton | None = None
+        self._ai_note: tk.Label | None = None
 
     def show(self, view: dict) -> None:
         if self.win is None:
             self._build(view)
         self._countdown.config(text=view["countdown"])
+        ai = view.get("ai")
+        if ai is not None and self._ai_check is not None:
+            self._ai_var.set(ai["checked"])
+            self._ai_check.config(text=ai["checkbox"], state="normal" if ai["enabled"] else "disabled")
+            self._ai_note.config(text=ai["note"])
 
     def hide(self) -> None:
         if self.win is not None:
             self.win.destroy()
             self.win = None
             self._countdown = None
+            self._ai_var = self._ai_check = self._ai_note = None
+
+    def _ai_toggled(self) -> None:
+        self.on_ai(bool(self._ai_var.get()))
+
+    def _build_ai(self, body: tk.Frame, ai: dict) -> None:
+        """Галочка режима «ИИ». Серая, пока ИИ не виден: поставить её без ИИ нельзя."""
+        self._ai_var = tk.BooleanVar(master=body, value=ai["checked"])
+        self._ai_check = tk.Checkbutton(
+            body,
+            text=ai["checkbox"],
+            variable=self._ai_var,
+            command=self._ai_toggled,
+            font=TEXT_FONT,
+            fg=FG,
+            bg=BG,
+            activeforeground=FG,
+            activebackground=BG,
+            selectcolor=BUTTON,
+            disabledforeground=MUTED,
+            highlightthickness=0,
+            state="normal" if ai["enabled"] else "disabled",
+        )
+        self._ai_check.pack(anchor="w", pady=(12, 0))
+        self._ai_note = _text(body, ai["note"], SMALL_FONT, MUTED)
+        self._ai_note.pack(anchor="w")
 
     def _build(self, view: dict) -> None:
         win = tk.Toplevel(self.root)
@@ -48,6 +83,8 @@ class ReportWindow:
         _week_chart(body, view["week"]).pack(anchor="w")
         self._countdown = _text(body, "", TEXT_FONT, WARN)
         self._countdown.pack(anchor="w", pady=(12, 0))
+        if view.get("ai") is not None:
+            self._build_ai(body, view["ai"])
         tk.Button(
             body,
             text=view["button"],
