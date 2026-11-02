@@ -9,6 +9,10 @@ from .ui_lock import BG, BUTTON, BUTTON_ACTIVE, FG, MUTED, SMALL_FONT, TEXT_FONT
 
 BAR = "#3a7bd5"
 REPORT_TITLE_FONT = ("Segoe UI", 26, "bold")
+REPORT_MIN_SIZE = (400, 500)  # меньше не делаем: иначе текст и кнопки перестают помещаться
+REPORT_MAX_HEIGHT = 0.8  # доля высоты экрана; остальное — заголовок окна и панель задач
+REPORT_PAD_X = 36  # боковые отступы; это пиксели Tk, при масштабе Windows они не растут
+WEEK_ROW = 28  # высота строки графика за 7 дней
 
 
 class ReportWindow:
@@ -21,6 +25,7 @@ class ReportWindow:
         self._ai_var: tk.BooleanVar | None = None
         self._ai_check: tk.Checkbutton | None = None
         self._ai_note: tk.Label | None = None
+        self._wrapped: list[tk.Widget] = []  # подписи и галочка: переносятся по ширине окна
 
     def show(self, view: dict) -> None:
         if self.win is None:
@@ -38,15 +43,16 @@ class ReportWindow:
             self.win = None
             self._countdown = None
             self._ai_var = self._ai_check = self._ai_note = None
+            self._wrapped = []
 
     def _ai_toggled(self) -> None:
         self.on_ai(bool(self._ai_var.get()))
 
-    def _build_ai(self, body: tk.Frame, ai: dict) -> None:
+    def _build_ai(self, footer: tk.Frame, ai: dict) -> None:
         """Галочка режима «ИИ». Серая, пока ИИ не виден: поставить её без ИИ нельзя."""
-        self._ai_var = tk.BooleanVar(master=body, value=ai["checked"])
+        self._ai_var = tk.BooleanVar(master=footer, value=ai["checked"])
         self._ai_check = tk.Checkbutton(
-            body,
+            footer,
             text=ai["checkbox"],
             variable=self._ai_var,
             command=self._ai_toggled,
@@ -61,7 +67,8 @@ class ReportWindow:
             state="normal" if ai["enabled"] else "disabled",
         )
         self._ai_check.pack(anchor="w", pady=(12, 0))
-        self._ai_note = _text(body, ai["note"], SMALL_FONT, MUTED)
+        self._wrapped.append(self._ai_check)
+        self._ai_note = self._label(footer, ai["note"], SMALL_FONT, MUTED)
         self._ai_note.pack(anchor="w")
 
     def _build(self, view: dict) -> None:
@@ -69,24 +76,19 @@ class ReportWindow:
         win.title(view["title"])
         win.configure(bg=BG)
         win.attributes("-topmost", True)
-        win.resizable(False, False)
+        win.resizable(True, True)
+        win.minsize(*REPORT_MIN_SIZE)
         win.protocol("WM_DELETE_WINDOW", self.on_close)
-        body = tk.Frame(win, bg=BG, padx=36, pady=28)
-        body.pack()
-        _text(body, view["title"], REPORT_TITLE_FONT, FG).pack(anchor="w")
-        _text(body, view["date"], TEXT_FONT, MUTED).pack(anchor="w", pady=(0, 12))
-        if view["warning"]:
-            _text(body, view["warning"], TEXT_FONT, WARN).pack(anchor="w", pady=(0, 12))
-        for line in view["lines"]:
-            _text(body, line, TEXT_FONT, FG).pack(anchor="w", pady=3)
-        _text(body, view["week_title"], TEXT_FONT, MUTED).pack(anchor="w", pady=(18, 6))
-        _week_chart(body, view["week"]).pack(anchor="w")
-        self._countdown = _text(body, "", TEXT_FONT, WARN)
-        self._countdown.pack(anchor="w", pady=(12, 0))
+        self._wrapped = []
+        # Внизу всегда видны таймер, галочка ИИ и кнопка, даже когда окно маленькое.
+        footer = tk.Frame(win, bg=BG, padx=REPORT_PAD_X)
+        footer.pack(side="bottom", fill="x")
+        self._countdown = self._label(footer, "", TEXT_FONT, WARN)
+        self._countdown.pack(anchor="w")
         if view.get("ai") is not None:
-            self._build_ai(body, view["ai"])
+            self._build_ai(footer, view["ai"])
         tk.Button(
-            body,
+            footer,
             text=view["button"],
             font=TEXT_FONT,
             bg=BUTTON,
@@ -97,8 +99,51 @@ class ReportWindow:
             padx=30,
             pady=10,
             command=self.on_close,
-        ).pack(pady=(18, 0))
+        ).pack(pady=(18, 28))
+        # Статистика и график прокручиваются, если окно ниже содержимого.
+        scroll = tk.Scrollbar(win, orient="vertical")
+        canvas = tk.Canvas(win, bg=BG, highlightthickness=0)
+        scroll.configure(command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        body = tk.Frame(canvas, bg=BG, padx=REPORT_PAD_X, pady=28)
+        item = canvas.create_window(0, 0, window=body, anchor="nw")
+        body.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: self._fit_width(canvas, item, event.width))
+        win.bind("<MouseWheel>", lambda event: canvas.yview_scroll(-1 if event.delta > 0 else 1, "units"))
+        self._label(body, view["title"], REPORT_TITLE_FONT, FG).pack(anchor="w")
+        self._label(body, view["date"], TEXT_FONT, MUTED).pack(anchor="w", pady=(0, 12))
+        if view["warning"]:
+            self._label(body, view["warning"], TEXT_FONT, WARN).pack(anchor="w", pady=(0, 12))
+        for line in view["lines"]:
+            self._label(body, line, TEXT_FONT, FG).pack(anchor="w", pady=3)
+        self._label(body, view["week_title"], TEXT_FONT, MUTED).pack(anchor="w", pady=(18, 6))
+        _week_chart(body, view["week"]).pack(fill="x")
         self.win = win
+        self._fit(win, body, footer, scroll)
+
+    def _fit(self, win: tk.Toplevel, body: tk.Frame, footer: tk.Frame, scroll: tk.Scrollbar) -> None:
+        """Окно по содержимому, но не выше REPORT_MAX_HEIGHT экрана, и по центру. Что не влезло, прокручивается."""
+        win.update_idletasks()
+        screen_w = win.winfo_screenwidth()
+        screen_h = win.winfo_screenheight()
+        width = min(body.winfo_reqwidth() + scroll.winfo_reqwidth(), screen_w)
+        height = min(body.winfo_reqheight() + footer.winfo_reqheight(), int(screen_h * REPORT_MAX_HEIGHT))
+        x = max(0, (screen_w - width) // 2)
+        y = max(0, (screen_h - height) // 2)
+        win.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _fit_width(self, canvas: tk.Canvas, item: int, width: int) -> None:
+        """Содержимое занимает ширину окна, подписи переносятся внутри неё."""
+        canvas.itemconfigure(item, width=width)
+        for widget in self._wrapped:
+            widget.config(wraplength=max(160, width - 2 * REPORT_PAD_X))
+
+    def _label(self, frame: tk.Frame, text: str, font: tuple, fg: str) -> tk.Label:
+        label = _text(frame, text, font, fg)
+        self._wrapped.append(label)
+        return label
 
 
 class WarningWindow:
@@ -155,13 +200,19 @@ def _text(frame: tk.Frame, text: str, font: tuple, fg: str) -> tk.Label:
 
 
 def _week_chart(frame: tk.Frame, week: list[tuple[str, float]]) -> tk.Canvas:
-    row = 28
+    canvas = tk.Canvas(frame, width=520, height=WEEK_ROW * len(week), bg=BG, highlightthickness=0)
+    canvas.bind("<Configure>", lambda event: _draw_week(canvas, week, event.width))
+    return canvas
+
+
+def _draw_week(canvas: tk.Canvas, week: list[tuple[str, float]], width: int) -> None:
+    """Полосы умещаются в ширину канваса: при узком окне график не выходит за край."""
+    canvas.delete("all")
     top = max((hours for _, hours in week), default=0.0) or 1.0
-    canvas = tk.Canvas(frame, width=520, height=row * len(week), bg=BG, highlightthickness=0)
+    room = max(60, width - 220)  # 70 px под дату слева, 150 px справа под подпись «N ч»
     for i, (label, hours) in enumerate(week):
-        y = i * row
-        length = int(300 * hours / top)
+        y = i * WEEK_ROW
+        length = int(room * hours / top)
         canvas.create_text(0, y + 12, text=label, anchor="w", fill=MUTED, font=SMALL_FONT)
         canvas.create_rectangle(70, y + 4, 70 + length, y + 22, fill=BAR, outline="")
         canvas.create_text(80 + length, y + 12, text=f"{hours:g} ч", anchor="w", fill=FG, font=SMALL_FONT)
-    return canvas
