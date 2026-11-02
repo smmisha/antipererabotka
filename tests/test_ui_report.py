@@ -125,3 +125,13 @@ def test_narrow_window_does_not_clip_text(root, open_report):
     assert widgets
     for widget in widgets:
         assert widget.winfo_width() <= width, widget.cget("text")
+
+
+def test_mouse_wheel_scrolls_content(root, open_report):
+    rw = open_report(SCALES[2])
+    canvas = first(rw.win, tk.Canvas)
+    top_before, _ = canvas.yview()
+    rw.win.event_generate("<MouseWheel>", delta=-120)  # колёсико вниз
+    root.update()
+    top_after, _ = canvas.yview()
+    assert top_after > top_before
