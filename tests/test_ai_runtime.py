@@ -108,13 +108,22 @@ def test_dark_view_is_used_only_while_the_mode_runs():
 
 def test_checkbox_is_grey_without_ai_and_names_the_ai_when_seen(tmp_path):
     rt = night_runtime(tmp_path)
-    view = rt._ai_view()
+    night = datetime(2026, 10, 26, 2, 0)
+    view = rt._ai_view(night)
     assert view["enabled"] is False and view["note"] == "ИИ сейчас не обнаружен"
     rt._ai_last = (True, ("Code.exe", "claude.exe", "node.exe", "python.exe"))
-    view = rt._ai_view()
+    view = rt._ai_view(night)
     assert view["enabled"] is True
     assert view["note"] == "ИИ обнаружен: VS Code, Claude, консольный агент"
     assert view["checked"] is False
+
+
+def test_daytime_says_when_ai_is_checked_not_a_stale_night_result(tmp_path):
+    rt = night_runtime(tmp_path)
+    rt._ai_last = (True, ("Code.exe",))  # старое ночное значение не должно прорываться днём
+    view = rt._ai_view(datetime(2026, 10, 26, 14, 0))
+    assert view["enabled"] is False
+    assert view["note"] == "Проверка ИИ идёт только ночью"
 
 
 def test_ai_titles_are_short_and_unique():

@@ -494,12 +494,20 @@ class Runtime:
             "week_title": t["stat_week"],
             "week": [(d.strftime("%d.%m"), hours) for d, hours in week],
             "countdown": countdown,
-            "ai": self._ai_view() if core.s.ai_mode_enabled else None,
+            "ai": self._ai_view(now) if core.s.ai_mode_enabled else None,
             "button": t["report_ok"],
         }
 
-    def _ai_view(self) -> dict:
+    def _ai_view(self, now: datetime) -> dict:
         t = self.cfg.texts
+        if not self.core.in_night(now):
+            # Днём ИИ не ищем: не показываем ни старое ночное значение, ни «не обнаружен», а говорим, когда проверка идёт.
+            return {
+                "checkbox": t["ai_checkbox"],
+                "checked": self.core.ai_request,
+                "enabled": False,
+                "note": t["ai_by_night"],
+            }
         active, names = self._ai_last
         note = t["ai_detected"].format(names=ai_watch.ai_titles(names)) if active else t["ai_not_detected"]
         return {
