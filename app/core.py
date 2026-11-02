@@ -135,6 +135,7 @@ class Core:
         self._make_code = make_code or self._random_code
         self.active_s = 0.0
         self.break_since: datetime | None = None
+        self._break_present_s = 0.0  # сколько перерыва человек провёл у экрана: это время не идёт в счёт перерыва
         self.snoozed = False
         self.snooze_until: datetime | None = None
         self._postponed_since: datetime | None = None
@@ -200,7 +201,8 @@ class Core:
     def break_wait_left(self, now: datetime) -> float:
         if self.break_since is None:
             return 0.0
-        return max(0.0, self.s.break_min_lock_s - (now - self.break_since).total_seconds())
+        away_s = (now - self.break_since).total_seconds() - self._break_present_s
+        return max(0.0, self.s.break_min_lock_s - away_s)
 
     def snooze_available(self, now: datetime) -> bool:
         return self.break_visible and not self.snoozed and self.break_wait_left(now) == 0.0
@@ -228,9 +230,11 @@ class Core:
         in_call: bool = False,
         ai_active: bool = False,
         ai_names: tuple[str, ...] = (),
+        present: bool | None = None,
     ) -> list[Event]:
         """ticks_ms — GetTickCount64, wall — time.time(), idle_s — секунды без ввода, in_call — идёт звонок,
-        ai_active — детектор видит ИИ, ai_names — процессы, которые он видит."""
+        ai_active — детектор видит ИИ, ai_names — процессы, которые он видит,
+        present — человек у экрана (True), нет (False), неизвестно (None: отсчёт идёт по времени)."""
         ev: list[Event] = self._events
         self._events = []
         self._apply_pending(now, ev)
@@ -238,6 +242,8 @@ class Core:
         self._ai_names = tuple(ai_names) if ai_active else ()
         in_night = self.in_night(now)
         dt, resumed = self._check_time(now, ticks_ms, wall, in_night, ev)
+        if self.break_since is not None and present:
+            self._break_present_s += dt  # перерыв стоит, пока человек у экрана
         if in_night:
             self._night_tick(now, resumed, wall, ev)
         elif self._night_key is not None:
@@ -268,12 +274,14 @@ class Core:
                 self.break_since = None
             elif self.break_since is None:
                 self.break_since = now
+                self._break_present_s = 0.0
                 self.snooze_until = None
                 ev.append(Event("break_shown", now, {"reason": "call_limit"}))
             return
         self._postponed_since = None
         if self.break_since is None and self._break_due(now, in_night):
             self.break_since = now
+            self._break_present_s = 0.0
             self.snooze_until = None
             ev.append(Event("break_shown", now))
 
@@ -459,7 +467,7 @@ class Core:
     # Действия пользователя и служебные вызовы.
 
     def water_drunk(self, now: datetime) -> list[Event]:
-        if self.break_since is None or (now - self.break_since).total_seconds() < self.s.break_min_lock_s:
+        if self.break_since is None or self.break_wait_left(now) > 0:
             return []
         ev = [Event("water_drunk", now, {"stretch_s": round(self.active_s)})]
         self._end_break()

@@ -11,7 +11,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from . import ai_watch, config, report, winapi
+from . import ai_watch, config, presence, report, winapi
 from .config import Config, Settings
 from .core import Core, Event, bypass_event, flash_code as make_flash_code, flash_window, key_matches, restored_active
 from .failsafe import ErrorThrottle, FailCounter
@@ -69,6 +69,7 @@ class Runtime:
         )
         self.report = ReportWindow(root, on_close=self.report_closed, on_ai=self.ai_request)
         self.warn = WarningWindow(root, on_close=self.warning_closed)
+        self.presence = presence.Presence()
         self.tray = Tray(
             title="Антипереработка",
             stats_label=cfg.texts["tray_stats"],
@@ -181,14 +182,17 @@ class Runtime:
         self._reload_config(now)
         self._process_actions(now)
         ai_active, ai_names = self._poll_ai(now)
+        # Своя камера на экране перерыва — не звонок: иначе перерыв сам себя спрячет.
+        in_call = winapi.call_in_progress() and not self.presence.active
         events = self.core.tick(
             now,
             winapi.idle_seconds(),
             winapi.tick_ms(),
             time.time(),
-            in_call=winapi.call_in_progress(),
+            in_call=in_call,
             ai_active=ai_active,
             ai_names=ai_names,
+            present=self.presence.present,
         )
         self._keep_awake()  # до сна: после конца режима Windows должна снова уметь уснуть
         if self.core.lock_visible:  # съёмные диски и файл ключа ищем только на экране ночной блокировки
@@ -234,6 +238,14 @@ class Runtime:
         self.tray.set_title(self._tray_title(now))
         if appeared:
             self._pause_media(now)  # блокировка уже на экране и с перехватом клавиш: теперь музыка и видео
+        self._sync_presence(kind)
+
+    def _sync_presence(self, kind: str | None) -> None:
+        """Камера только на экране перерыва. Включается после паузы медиа и гаснет, как только перерыв ушёл."""
+        if kind == "break" and self.core.s.break_presence:
+            self.presence.start()
+        else:
+            self.presence.stop()
 
     def _persist(self, now: datetime) -> None:
         mono = time.monotonic()
@@ -392,9 +404,15 @@ class Runtime:
         t = self.cfg.texts
         core = self.core
         left = core.break_wait_left(now)
+        if left <= 0:
+            countdown = ""
+        elif self.presence.present:
+            countdown = t["break_wait_present"].format(sec=math.ceil(left))
+        else:
+            countdown = t["break_wait"].format(sec=math.ceil(left))
         return {
             "title": t["break_title"],
-            "countdown": t["break_wait"].format(sec=math.ceil(left)) if left > 0 else "",
+            "countdown": countdown,
             "water_enabled": left <= 0,
             "water_text": t["break_drunk"],
             "snooze": t["break_snooze"].format(minutes=_num(core.s.snooze_min)) if core.snooze_available(now) else "",

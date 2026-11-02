@@ -41,7 +41,7 @@ INT_RANGES = {
     "flash_unlocks_per_night": (1, 50),
     "emergency_unlocks_per_night": (1, 50),
 }
-BOOL_FIELDS = ("ai_mode_enabled",)
+BOOL_FIELDS = ("ai_mode_enabled", "break_presence")
 AI_PROCESSES_MAX = 20
 
 
@@ -55,6 +55,7 @@ class Settings:
 
     break_interval_min: float = 60
     break_min_lock_s: float = 300
+    break_presence: bool = True  # во время перерыва таймер стоит, пока человек у экрана (обычная веб-камера)
     snooze_min: float = 10
     idle_reset_min: float = 5
     active_gap_s: float = 120
@@ -106,6 +107,7 @@ def short_settings() -> Settings:
 DEFAULT_TEXTS = {
     "break_title": "Встань, пройдись и выпей воды",
     "break_wait": "Кнопки появятся через {sec} с",
+    "break_wait_present": "Вы у экрана: таймер стоит. Отойдите, осталось {sec} с",
     "break_drunk": "Вода выпита",
     "break_snooze": "Отложить на {minutes} минут",
     "report_title": "Отчёт перед сном",

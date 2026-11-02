@@ -5,6 +5,7 @@ from app import runtime, winapi
 from app.config import Settings
 from app.core import Core
 from app.runtime import Runtime
+from app.presence import Presence
 
 NOW = datetime(2026, 10, 29, 2, 0)
 DAY = datetime(2026, 10, 29, 14, 0)
@@ -47,6 +48,7 @@ def runtime_with(core, journal):
     rt.lock = Quiet()
     rt.report = Quiet()
     rt.warn = Quiet()
+    rt.presence = Presence(open_camera=lambda: None)  # без настоящей камеры в тестах
     rt.tray = Quiet()
     rt.guard = Quiet()
     rt._lock_kind = None
@@ -58,7 +60,7 @@ def runtime_with(core, journal):
 
 def screen(break_visible=False, lock_visible=False):
     return SimpleNamespace(
-        break_visible=break_visible, lock_visible=lock_visible, report_open=False, warning_visible=False
+        break_visible=break_visible, lock_visible=lock_visible, report_open=False, warning_visible=False, s=Settings()
     )
 
 
