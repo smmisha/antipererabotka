@@ -5,9 +5,9 @@ from __future__ import annotations
 import tkinter as tk
 from collections.abc import Callable
 
-from .ui_lock import BG, BUTTON, BUTTON_ACTIVE, FG, MUTED, SMALL_FONT, TEXT_FONT, WARN
+from .ui_lock import ACCENT, ACCENT_ACTIVE, BG, BRAND, FG, LINE, MUTED, ON_ACCENT, SMALL_FONT, TEXT_FONT, WARN, logo
 
-BAR = "#3a7bd5"
+BAR = ACCENT
 REPORT_TITLE_FONT = ("Segoe UI", 26, "bold")
 REPORT_MIN_SIZE = (400, 500)  # меньше не делаем: иначе текст и кнопки перестают помещаться
 REPORT_MAX_HEIGHT = 0.8  # доля высоты экрана; остальное — заголовок окна и панель задач
@@ -61,7 +61,7 @@ class ReportWindow:
             bg=BG,
             activeforeground=FG,
             activebackground=BG,
-            selectcolor=BUTTON,
+            selectcolor=ACCENT,
             disabledforeground=MUTED,
             highlightthickness=0,
             state="normal" if ai["enabled"] else "disabled",
@@ -83,23 +83,12 @@ class ReportWindow:
         # Внизу всегда видны таймер, галочка ИИ и кнопка, даже когда окно маленькое.
         footer = tk.Frame(win, bg=BG, padx=REPORT_PAD_X)
         footer.pack(side="bottom", fill="x")
+        _rule(footer).pack(fill="x", pady=(0, 14))
         self._countdown = self._label(footer, "", TEXT_FONT, WARN)
         self._countdown.pack(anchor="w")
         if view.get("ai") is not None:
             self._build_ai(footer, view["ai"])
-        tk.Button(
-            footer,
-            text=view["button"],
-            font=TEXT_FONT,
-            bg=BUTTON,
-            fg=FG,
-            activebackground=BUTTON_ACTIVE,
-            activeforeground=FG,
-            relief="flat",
-            padx=30,
-            pady=10,
-            command=self.on_close,
-        ).pack(pady=(18, 28))
+        _action(footer, view["button"], self.on_close).pack(pady=(18, 28))
         # Статистика и график прокручиваются, если окно ниже содержимого.
         scroll = tk.Scrollbar(win, orient="vertical")
         canvas = tk.Canvas(win, bg=BG, highlightthickness=0)
@@ -112,13 +101,19 @@ class ReportWindow:
         body.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>", lambda event: self._fit_width(canvas, item, event.width))
         win.bind("<MouseWheel>", lambda event: canvas.yview_scroll(-1 if event.delta > 0 else 1, "units"))
-        self._label(body, view["title"], REPORT_TITLE_FONT, FG).pack(anchor="w")
-        self._label(body, view["date"], TEXT_FONT, MUTED).pack(anchor="w", pady=(0, 12))
+        head = tk.Frame(body, bg=BG)
+        head.pack(anchor="w")
+        logo(head, BG, size=36).pack(side="left")
+        self._label(head, BRAND, SMALL_FONT, MUTED).pack(side="left", padx=(12, 0))
+        self._label(body, view["title"], REPORT_TITLE_FONT, FG).pack(anchor="w", pady=(18, 0))
+        self._label(body, view["date"], TEXT_FONT, MUTED).pack(anchor="w", pady=(4, 0))
+        _rule(body).pack(fill="x", pady=(18, 16))
         if view["warning"]:
-            self._label(body, view["warning"], TEXT_FONT, WARN).pack(anchor="w", pady=(0, 12))
+            self._label(body, view["warning"], TEXT_FONT, WARN).pack(anchor="w", pady=(0, 14))
         for line in view["lines"]:
             self._label(body, line, TEXT_FONT, FG).pack(anchor="w", pady=3)
-        self._label(body, view["week_title"], TEXT_FONT, MUTED).pack(anchor="w", pady=(18, 6))
+        _rule(body).pack(fill="x", pady=(18, 16))
+        self._label(body, view["week_title"], TEXT_FONT, MUTED).pack(anchor="w", pady=(0, 8))
         _week_chart(body, view["week"]).pack(fill="x")
         self.win = win
         self._fit(win, body, footer, scroll)
@@ -175,24 +170,36 @@ class WarningWindow:
         win.protocol("WM_DELETE_WINDOW", self.on_close)
         body = tk.Frame(win, bg=BG, padx=36, pady=28)
         body.pack()
-        _text(body, view["title"], REPORT_TITLE_FONT, WARN).pack(anchor="w")
-        _text(body, view["text"], TEXT_FONT, FG).pack(anchor="w", pady=(0, 12))
+        logo(body, BG, size=48).pack(anchor="w")
+        _text(body, view["title"], REPORT_TITLE_FONT, WARN).pack(anchor="w", pady=(14, 0))
+        _text(body, view["text"], TEXT_FONT, FG).pack(anchor="w", pady=(6, 14))
+        _rule(body).pack(fill="x", pady=(0, 14))
         self._countdown = _text(body, "", TEXT_FONT, WARN)
         self._countdown.pack(anchor="w")
-        tk.Button(
-            body,
-            text=view["button"],
-            font=TEXT_FONT,
-            bg=BUTTON,
-            fg=FG,
-            activebackground=BUTTON_ACTIVE,
-            activeforeground=FG,
-            relief="flat",
-            padx=30,
-            pady=10,
-            command=self.on_close,
-        ).pack(pady=(18, 0))
+        _action(body, view["button"], self.on_close).pack(pady=(18, 0))
         self.win = win
+
+
+def _rule(frame: tk.Frame) -> tk.Frame:
+    """Тонкая линия-разделитель между блоками."""
+    return tk.Frame(frame, height=1, bg=LINE)
+
+
+def _action(frame: tk.Frame, text: str, command: Callable[[], None]) -> tk.Button:
+    """Главная кнопка окна: синяя, как основное действие в окне блокировки."""
+    return tk.Button(
+        frame,
+        text=text,
+        font=TEXT_FONT,
+        bg=ACCENT,
+        fg=ON_ACCENT,
+        activebackground=ACCENT_ACTIVE,
+        activeforeground=ON_ACCENT,
+        relief="flat",
+        padx=30,
+        pady=10,
+        command=command,
+    )
 
 
 def _text(frame: tk.Frame, text: str, font: tuple, fg: str) -> tk.Label:

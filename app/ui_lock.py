@@ -13,6 +13,10 @@ MUTED = "#9aa1ac"
 WARN = "#f0b060"
 BUTTON = "#2d3440"
 BUTTON_ACTIVE = "#3b4555"
+ACCENT = "#3a7bd5"  # главное действие и знак: спокойный синий
+ACCENT_ACTIVE = "#4d8ae0"
+ON_ACCENT = "#ffffff"  # текст на синей кнопке
+LINE = "#262b35"  # тонкие разделители между блоками
 CODE_BG = "#1e2229"
 DARK_BG = "#07080a"  # тёмный вид режима «ИИ»: спокойный экран без яркого света
 DARK_CODE_BG = "#101216"
@@ -20,6 +24,7 @@ TITLE_FONT = ("Segoe UI", 36, "bold")
 TEXT_FONT = ("Segoe UI", 18)
 SMALL_FONT = ("Segoe UI", 13)
 CODE_FONT = ("Consolas", 24, "bold")
+BRAND = "Антипереработка"
 
 
 class LockScreen:
@@ -106,9 +111,10 @@ class LockScreen:
 
     def _break_widgets(self, frame: tk.Frame) -> dict:
         w = {
+            "logo": logo(frame, BG, size=56),
             "title": _label(frame, TITLE_FONT, FG),
             "countdown": _label(frame, TEXT_FONT, MUTED),
-            "water": _button(frame, self.on_water),
+            "water": _button(frame, self.on_water, primary=True),
             "snooze": _button(frame, self.on_snooze),
             "banner": _label(frame, SMALL_FONT, MUTED),
         }
@@ -119,6 +125,7 @@ class LockScreen:
     def _night_widgets(self, frame: tk.Frame) -> dict:
         bg = DARK_BG if self._dark else BG
         w = {
+            "logo": logo(frame, bg, size=56),
             "title": _label(frame, TEXT_FONT if self._dark else TITLE_FONT, FG, bg),
             "now": _label(frame, TEXT_FONT, MUTED, bg),
             "flash_label": _label(frame, SMALL_FONT, MUTED, bg),
@@ -129,7 +136,7 @@ class LockScreen:
             "code_timer": _label(frame, SMALL_FONT, WARN, bg),
             "hint": _label(frame, SMALL_FONT, MUTED, bg),
             "entry": _entry(frame, DARK_CODE_BG if self._dark else CODE_BG),
-            "button": _button(frame, lambda: None),
+            "button": _button(frame, lambda: None, primary=True),
             "message": _label(frame, SMALL_FONT, WARN, bg),
             "wait": _label(frame, TEXT_FONT, FG, bg),
             "banner": _label(frame, SMALL_FONT, MUTED, bg),
@@ -152,14 +159,29 @@ def _label(frame: tk.Frame, font: tuple, fg: str, bg: str = BG) -> tk.Label:
     return tk.Label(frame, font=font, fg=fg, bg=bg, wraplength=1100, justify="center")
 
 
-def _button(frame: tk.Frame, command: Callable[[], None]) -> tk.Button:
+def logo(frame: tk.Frame, bg: str, size: int = 40) -> tk.Canvas:
+    """Знак: кольцо и два штриха паузы. Рисуется линиями, файл-картинка не нужен. size — в пикселях при 96 DPI."""
+    px = round(size * float(frame.tk.call("tk", "scaling")) * 72 / 96)  # масштаб Windows, как у шрифтов
+    canvas = tk.Canvas(frame, width=px, height=px, bg=bg, highlightthickness=0)
+    inset = px * 0.06
+    canvas.create_oval(inset, inset, px - inset, px - inset, outline=ACCENT, width=max(2, round(px / 14)))
+    for x in (px * 0.40, px * 0.60):
+        canvas.create_line(x, px * 0.32, x, px * 0.68, fill=ACCENT, width=max(2, round(px / 9)), capstyle="round")
+    return canvas
+
+
+def _button(frame: tk.Frame, command: Callable[[], None], primary: bool = False) -> tk.Button:
+    """Основное действие синей кнопкой, остальные — тёмной."""
+    bg, active = (ACCENT, ACCENT_ACTIVE) if primary else (BUTTON, BUTTON_ACTIVE)
+    fg = ON_ACCENT if primary else FG
     return tk.Button(
         frame,
         font=TEXT_FONT,
-        bg=BUTTON,
-        fg=FG,
-        activebackground=BUTTON_ACTIVE,
-        activeforeground=FG,
+        bg=bg,
+        fg=fg,
+        activebackground=active,
+        activeforeground=fg,
+        disabledforeground=MUTED,
         relief="flat",
         padx=30,
         pady=10,
@@ -194,7 +216,8 @@ def _toggle(widget: tk.Widget, shown: bool) -> None:
 def _update_break(w: dict, view: dict) -> None:
     w["title"].config(text=view["title"])
     w["countdown"].config(text=view["countdown"])
-    w["water"].config(text=view["water_text"], state="normal" if view["water_enabled"] else "disabled")
+    enabled = bool(view["water_enabled"])  # пока кнопка заблокирована, она серая, а не синяя с плохим текстом
+    w["water"].config(text=view["water_text"], state="normal" if enabled else "disabled", bg=ACCENT if enabled else BUTTON)
     w["snooze"].config(text=view["snooze"] or "")
     _toggle(w["snooze"], bool(view["snooze"]))
     w["banner"].config(text=view["banner"])
@@ -221,6 +244,7 @@ def _update_night(w: dict, view: dict) -> None:
     _toggle(w["flash_code"], not waiting and bool(view["flash_code"]))
     _toggle(w["flash_timer"], not waiting and bool(view["flash_timer"]))
     # В тёмном виде одна строка текста и поле кода: без кнопки и подсказок, код вводится клавишей Enter.
+    _toggle(w["logo"], not dark)  # в тёмном виде режима «ИИ» знака нет: экран спокойный
     _toggle(w["now"], not dark)
     _toggle(w["hint"], not waiting and not dark)
     _toggle(w["button"], not waiting and not dark)
