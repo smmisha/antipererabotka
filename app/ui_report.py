@@ -9,6 +9,7 @@ from .ui_lock import ACCENT, ACCENT_ACTIVE, BG, BRAND, FG, LINE, MUTED, ON_ACCEN
 
 BAR = ACCENT
 REPORT_TITLE_FONT = ("Segoe UI", 26, "bold")
+BRAND_FONT = ("Segoe UI", 16, "bold")
 REPORT_MIN_SIZE = (400, 500)  # меньше не делаем: иначе текст и кнопки перестают помещаться
 REPORT_MAX_HEIGHT = 0.8  # доля высоты экрана; остальное — заголовок окна и панель задач
 REPORT_PAD_X = 36  # боковые отступы; это пиксели Tk, при масштабе Windows они не растут
@@ -30,7 +31,7 @@ class ReportWindow:
     def show(self, view: dict) -> None:
         if self.win is None:
             self._build(view)
-        self._countdown.config(text=view["countdown"])
+        self._set_countdown(view["countdown"])
         ai = view.get("ai")
         if ai is not None and self._ai_check is not None:
             self._ai_var.set(ai["checked"])
@@ -47,6 +48,15 @@ class ReportWindow:
 
     def _ai_toggled(self) -> None:
         self.on_ai(bool(self._ai_var.get()))
+
+    def _set_countdown(self, text: str) -> None:
+        """Таймер виден только ночью. Пустую строку не держим: иначе между разделителем и галочкой остаётся пустой промежуток."""
+        self._countdown.config(text=text)
+        shown = self._countdown.winfo_manager() != ""
+        if text and not shown:
+            self._countdown.pack(anchor="w", before=self._below_countdown)
+        elif not text and shown:
+            self._countdown.pack_forget()
 
     def _build_ai(self, footer: tk.Frame, ai: dict) -> None:
         """Галочка режима «ИИ». Серая, пока ИИ не виден: поставить её без ИИ нельзя."""
@@ -85,10 +95,12 @@ class ReportWindow:
         footer.pack(side="bottom", fill="x")
         _rule(footer).pack(fill="x", pady=(0, 14))
         self._countdown = self._label(footer, "", TEXT_FONT, WARN)
-        self._countdown.pack(anchor="w")
         if view.get("ai") is not None:
             self._build_ai(footer, view["ai"])
-        _action(footer, view["button"], self.on_close).pack(pady=(18, 28))
+        ok = _action(footer, view["button"], self.on_close)
+        ok.pack(pady=(18, 28))
+        self._below_countdown = self._ai_check if self._ai_check is not None else ok
+        self._set_countdown(view["countdown"])
         # Статистика и график прокручиваются, если окно ниже содержимого.
         scroll = tk.Scrollbar(win, orient="vertical")
         canvas = tk.Canvas(win, bg=BG, highlightthickness=0)
@@ -102,9 +114,9 @@ class ReportWindow:
         canvas.bind("<Configure>", lambda event: self._fit_width(canvas, item, event.width))
         win.bind("<MouseWheel>", lambda event: canvas.yview_scroll(-1 if event.delta > 0 else 1, "units"))
         head = tk.Frame(body, bg=BG)
-        head.pack(anchor="w")
-        logo(head, BG, size=36).pack(side="left")
-        self._label(head, BRAND, SMALL_FONT, MUTED).pack(side="left", padx=(12, 0))
+        head.pack(anchor="w", pady=(12, 0))  # ниже верхнего края окна, а не впритык к заголовку
+        logo(head, BG, size=44).pack(side="left")
+        self._label(head, BRAND, BRAND_FONT, FG).pack(side="left", padx=(14, 0))
         self._label(body, view["title"], REPORT_TITLE_FONT, FG).pack(anchor="w", pady=(18, 0))
         self._label(body, view["date"], TEXT_FONT, MUTED).pack(anchor="w", pady=(4, 0))
         _rule(body).pack(fill="x", pady=(18, 16))

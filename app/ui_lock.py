@@ -160,13 +160,16 @@ def _label(frame: tk.Frame, font: tuple, fg: str, bg: str = BG) -> tk.Label:
 
 
 def logo(frame: tk.Frame, bg: str, size: int = 40) -> tk.Canvas:
-    """Знак: кольцо и два штриха паузы. Рисуется линиями, файл-картинка не нужен. size — в пикселях при 96 DPI."""
+    """Знак: часы со стрелками, без символа паузы. Рисуется линиями, файл-картинка не нужен. size — в пикселях при 96 DPI."""
     px = round(size * float(frame.tk.call("tk", "scaling")) * 72 / 96)  # масштаб Windows, как у шрифтов
     canvas = tk.Canvas(frame, width=px, height=px, bg=bg, highlightthickness=0)
     inset = px * 0.06
-    canvas.create_oval(inset, inset, px - inset, px - inset, outline=ACCENT, width=max(2, round(px / 14)))
-    for x in (px * 0.40, px * 0.60):
-        canvas.create_line(x, px * 0.32, x, px * 0.68, fill=ACCENT, width=max(2, round(px / 9)), capstyle="round")
+    hand = max(2, round(px / 12))
+    mid = px / 2
+    canvas.create_oval(inset, inset, px - inset, px - inset, outline=ACCENT, width=hand)
+    canvas.create_line(mid, mid, mid, px * 0.24, fill=ACCENT, width=hand, capstyle="round")
+    canvas.create_line(mid, mid, px * 0.70, mid + px * 0.08, fill=ACCENT, width=hand, capstyle="round")
+    canvas.create_oval(mid - hand, mid - hand, mid + hand, mid + hand, fill=ACCENT, outline="")
     return canvas
 
 
