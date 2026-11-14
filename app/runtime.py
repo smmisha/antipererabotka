@@ -98,7 +98,26 @@ class Runtime:
 
     def start(self) -> None:
         now = datetime.now()
-        events = [Event("app_start", now, {"test": self.test})]
+        s = self.settings
+        events = [
+            Event("app_start", now, {"test": self.test}),
+            Event(
+                "settings_loaded",
+                now,
+                {
+                    "path": str(self.cfg_path),
+                    "file_size": self.cfg_path.stat().st_size if self.cfg_path.exists() else None,
+                    "config_error": self._config_error,
+                    "code": str(Path(config.__file__).parent),
+                    "cwd": str(Path.cwd()),
+                    "break_interval_min": s.break_interval_min,
+                    "unlock_min": s.unlock_min,
+                    "usb_unlock_min": s.usb_unlock_min,
+                    "flash_unlocks_per_night": s.flash_unlocks_per_night,
+                    "emergency_unlocks_per_night": s.emergency_unlocks_per_night,
+                },
+            ),
+        ]
         if self._config_error:
             events.append(Event("config_invalid", now, {"reason": self._config_error}))
             self._log_error_text(self._config_error)
