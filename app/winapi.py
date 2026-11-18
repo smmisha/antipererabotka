@@ -19,6 +19,7 @@ shcore = ctypes.WinDLL("shcore", use_last_error=True)
 
 KEY_FILE = "antipererabotka.key"
 CONSENT_STORE = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
+CALL_IGNORED_APPS = ("discord",)  # Дискорд звонком не считаем: голосовые каналы не срывают перерыв (имя раздела в журнале доступа)
 DRIVE_REMOVABLE = 2
 ERROR_ALREADY_EXISTS = 183
 WH_KEYBOARD_LL = 13
@@ -198,9 +199,11 @@ def _device_in_use(path: str, depth: int) -> bool:
                 name = winreg.EnumKey(key, i)
             except OSError:  # подразделы кончились
                 return False
+            i += 1
+            if any(app in name.lower() for app in CALL_IGNORED_APPS):
+                continue
             if _device_in_use(f"{path}\\{name}", depth - 1):
                 return True
-            i += 1
 
 
 def call_in_progress() -> bool:

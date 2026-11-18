@@ -159,42 +159,28 @@ def test_night_lock_is_not_postponed_by_a_call():
     assert "break_postponed" not in kinds(events)
 
 
-def test_call_postpones_a_break_at_most_60_minutes():
+def test_call_never_shows_a_break_however_long_it_lasts():
     core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))
-    t.run(3600, in_call=True)
+    events = t.run(3 * 3600, in_call=True)
     assert not core.break_visible
-    t.run(3599, in_call=True)
-    assert not core.break_visible
-    events = t.run(1, in_call=True)
-    assert core.break_visible
-    assert [(e.kind, e.payload) for e in events if e.kind == "break_shown"] == [
-        ("break_shown", {"reason": "call_limit"})
-    ]
+    assert "break_shown" not in kinds(events)
+    assert [e.kind for e in events].count("break_postponed") == 1
 
 
-def test_each_break_gets_its_own_call_limit():
+def test_break_waits_for_each_call_to_end():
     core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
     t = Ticker(core, datetime(2026, 10, 25, 10, 0))
     t.run(7200, in_call=True)
+    assert not core.break_visible
+    events = t.run(1)
     assert core.break_visible
-    t.run(300, in_call=True)
+    assert "break_shown" in kinds(events)
+    t.run(300)
     assert core.water_drunk(t.now)
     t.run(3600, in_call=True)
     assert not core.break_visible
-    t.run(3600, in_call=True)
-    assert core.break_visible
-
-
-def test_snoozing_a_forced_break_does_not_restart_the_call_limit():
-    core = Core(NORMAL, datetime(2026, 10, 25, 10, 0))
-    t = Ticker(core, datetime(2026, 10, 25, 10, 0))
-    t.run(7200, in_call=True)
-    t.run(300, in_call=True)
-    assert core.snooze(t.now)
-    t.run(599, in_call=True)
-    assert not core.break_visible
-    t.run(1, in_call=True)
+    t.run(1)
     assert core.break_visible
 
 

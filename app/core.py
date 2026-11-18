@@ -19,7 +19,6 @@ CODE_ALPHABET = "".join(c for c in string.ascii_letters + string.digits if c not
 MAX_STEP_S = 5.0  # больший шаг опроса значит сон или зависание: в активное время не идёт
 CLOCK_TOLERANCE_S = 120.0  # расхождение часов больше этого считаем переводом часов
 RESUME_GAP_S = 60.0  # опроса не было больше минуты: пробуждение
-CALL_POSTPONE_MAX = timedelta(minutes=60)  # звонок откладывает перерыв не дольше этого, потом перерыв показывается и во время звонка
 TEST_NIGHT_MIN = (3.0, 3.5, 4.0, 6.0)  # тест: отчёт, напоминание, блокировка, утро (минуты от старта)
 TEST_AI_CAP_MIN = 8.0  # тест: режим «ИИ» заканчивается не позже этого (минуты от старта)
 FINAL_WARNING_S = 60.0  # за столько секунд до блокировки окно отчёта показывается снова
@@ -263,20 +262,14 @@ class Core:
         return ev
 
     def _schedule_break(self, now: datetime, in_night: bool, in_call: bool, ev: list[Event]) -> None:
-        """Перерыв по расписанию. Звонок его откладывает, но на один перерыв не дольше CALL_POSTPONE_MAX."""
+        """Перерыв по расписанию. Пока идёт звонок, перерыв не показывается, сколько бы звонок ни шёл."""
         if in_call and not in_night:
             if self.break_since is None and not self._break_due(now, in_night):
                 return  # отсрочку держим, пока перерыв не закончился, в том числе отложенный «Отложить»
             if self._postponed_since is None:
                 self._postponed_since = now
                 ev.append(Event("break_postponed", now, {"reason": "call"}))
-            if now - self._postponed_since < CALL_POSTPONE_MAX:
-                self.break_since = None
-            elif self.break_since is None:
-                self.break_since = now
-                self._break_present_s = 0.0
-                self.snooze_until = None
-                ev.append(Event("break_shown", now, {"reason": "call_limit"}))
+            self.break_since = None
             return
         self._postponed_since = None
         if self.break_since is None and self._break_due(now, in_night):
